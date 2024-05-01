@@ -1,0 +1,20 @@
+version: "3"
+services:
+  data_extraction:
+    build:
+      context: .
+    container_name: data_extraction
+    user: "1001"
+    working_dir: /app
+    volumes:
+      - ./logs:/app/logs
+      - ./output:/app/output
+      - ./config:/app/config
+      - /etc/localtime:/etc/localtime:ro # sync timezone with host machine
+    command: ["python", "main.py"]
+    networks:
+      - mqtt5-network
+
+networks:
+  mqtt5-network:
+    external: true
