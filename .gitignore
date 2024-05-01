@@ -166,4 +166,5 @@ cython_debug/
 
 # Data processed during program runtime
 /output
+/processed_output
 /logs
