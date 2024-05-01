@@ -10,13 +10,11 @@
 from mqtt_node_network.node import MQTTNode
 from mqtt_node_network.client import (MQTTClient, MQTTBrokerConfig)
 from mqtt_node_network.initialize import initialize
-from mqtt_node_network.configure import load_config
 from paho.mqtt.client import MQTTMessage
 
 import time
 from datetime import datetime
 import pandas as pd
-import polars as pl
 import os
 from threading import (Thread, Lock)
 import json
@@ -78,24 +76,7 @@ class DataExtractionClient(MQTTClient):
         self.id_structure = id_structure
 
 
-    def on_message(self, client, userdata, message: MQTTMessage):
-        MQTTNode.on_message(self, client, userdata, message)
-        
-        # Maybe call parse_topic function from parent class
-        message_topic_breakdown = message.topic.split("/")
-        topic_structure_breakdown = self.topic_structure.split("/")
-        id_breakdown = self.id_structure.split("/")
-        topic_template: dict = {}
-
-        for (topic_subsection, message_subsection) in zip(topic_structure_breakdown, message_topic_breakdown):
-            topic_template.update({topic_subsection: message_subsection})
-
-        field_id = ""
-        for (index, id_subsection) in enumerate(id_breakdown):
-            field_id += topic_template.get(id_subsection)
-            if index != len(topic_template) - 1:
-                field_id += "/"
-
+    def check_message_value(self, message: MQTTMessage):
         if message.payload is None:
             logger.debug(
                 f"Null message ignored. Received None on topic '{message.topic}'"
@@ -105,6 +86,7 @@ class DataExtractionClient(MQTTClient):
         elif isinstance(message.payload, bytes):
             value = message.payload.decode()
 
+        value = message.payload.decode()
         if value == "nan":
             logger.debug(
                 f"Null message ignored. Received 'nan' on topic '{message.topic}'"
@@ -128,10 +110,37 @@ class DataExtractionClient(MQTTClient):
                 f"Message is not a valid type. Received '{type(value)}' on topic '{message.topic}'"
             )
             return
+        
+        return value
+
+
+    def on_message(self, client, userdata, message: MQTTMessage):
+        MQTTNode.on_message(self, client, userdata, message)
+
+        value = self.check_message_value(message)
+        if value is None:
+            return
+        
+        # Maybe call parse_topic function from parent class
+        message_topic_breakdown = message.topic.split("/")
+        topic_structure_breakdown = self.topic_structure.split("/")
+        id_breakdown = self.id_structure.split("/")
+        topic_template: dict = {}
+
+        for (topic_subsection, message_subsection) in zip(topic_structure_breakdown, message_topic_breakdown):
+            topic_template.update({topic_subsection: message_subsection})
+
+        field_id = ""
+        for (index, id_subsection) in enumerate(id_breakdown):
+            field_id += topic_template.get(id_subsection)
+            if index != (len(topic_template) - 1):
+                field_id += "/"
 
         data = {
             "time": datetime.now(),
-            field_id: value
+            "topic": message.topic,
+            "id": field_id,
+            "value": value
         }
         self.buffer.append(data)
 
@@ -189,7 +198,6 @@ class DataExtractionClient(MQTTClient):
 
     def end_of_day(self, year, month, day) -> None:
         df = pd.read_csv(f"./output/{self.raw_output_filename}_{year}_{month}_{day}.csv")
-        df["time"] = pd.to_datetime(df["time"])
         df = self.process_data_pandas(df)
         filename = f"./processed_output/{self.processed_output_filename}"
         self.start_time = datetime.now()
@@ -200,29 +208,16 @@ class DataExtractionClient(MQTTClient):
     #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
     def process_data_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
         start = time.perf_counter()
+        df["time"] = pd.to_datetime(df["time"])
+        df = df.drop(columns = "topic")
+        df = df.pivot(index = "time", columns = ["id"], values = "value")
         df = df.interpolate()
-        df = df.resample(rule = f'{self.resample_time_seconds}s', on = "time")
-        df = df.mean()
+        df = df.resample(rule = f"{self.resample_time_seconds}s").mean()
         stop = time.perf_counter()
         performance_time = stop - start
-        print(f"Pandas performance time: {performance_time}")
+        logger.info(f"Pandas performance time: {performance_time}")
         return df
 
-    # TODO: Results are scuffed with how the group_by_dynamics function works?
-    def process_data_polars(self, buffer: deque[dict]) -> pl.DataFrame:
-        start = time.perf_counter()
-        df = pl.DataFrame(buffer)
-        print("Raw Polars df:")
-        print(df)
-        df = df.interpolate().set_sorted("time")
-        df = df.group_by_dynamic("time", every = f"{self.resample_time_seconds}s").agg(pl.exclude("time")).mean()
-        stop = time.perf_counter()
-        performance_time = stop - start
-        print("Final Polars df: ")
-        print(df)
-        print(f"Polars performance time: {performance_time}")
-        return df
-    
 
     #--------------Functions for updating csv with topics when buffer fills up-----------------------------------
     def manage_buffer_thread(self):
@@ -238,25 +233,26 @@ class DataExtractionClient(MQTTClient):
 
     
     #---------------Write to csv functions-----------------------------------------------------------------------
-    def update_csv(self, update_list: deque[dict], filename: str, use_polars: bool = False) -> None:
-        if use_polars:
-            df = pl.DataFrame(update_list)
-        else:
-            df = pd.DataFrame(update_list)
-        self.write_to_file(df, filename)
+    def update_csv(self, update_list: deque[dict], filename: str) -> None:
+        df = pd.DataFrame(update_list)
+        self.write_to_file(df, filename, append = True)
 
 
-    def write_to_file(self, df: pd.DataFrame | pl.DataFrame, filename: str) -> None:
+    def write_to_file(
+            self,
+            df: pd.DataFrame,
+            filename: str,
+            append: bool = False
+        ) -> None:
         year = self.start_time.year
         month = self.start_time.month
         day = self.start_time.day
         output_path = filename + f"_{year}_{month}_{day}.csv"
 
-        if isinstance(df, pd.DataFrame):
-            df.to_csv(output_path, mode = 'a', header = not os.path.exists(output_path))
-        # TODO: Need to implement appending to the file if it already exists for Polars
-        elif isinstance(df, pl.DataFrame):
-            df.write_csv(output_path)
+        if append:
+            df.to_csv(output_path, mode = 'a', header = not os.path.exists(output_path), index = False)
+        else:
+            df.to_csv(output_path)
 
 
     #-----------------------Currently unused---------------------------------------------------------------------

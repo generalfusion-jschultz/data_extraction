@@ -28,7 +28,6 @@ dependencies = [
    "numpy",
    "mqtt-node-network @ git+https://github.com/generalmattza/mqtt-node-network.git",
    "pandas",
-   "polars",
    "paho-mqtt"
 ]
 

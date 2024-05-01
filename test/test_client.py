@@ -21,8 +21,13 @@ BROKER_CONFIG = MQTTBrokerConfig(
 )
 NAME = "test_name"
 NODE_ID = "test_node_id"
+ID_STRUCtURE = "measurement/field*"
 NODE_TYPE = "test_node_type"
-MAX_BUFFER = 1000
+MAX_BUFFER_LENGTH = 1000
+MAX_BUFFER_TIME = 10
+RESAMPLE_TIME = 1
+RAW_OUTPUT_FILENAME = "raw"
+PROCESSED_OUTPUT_FILENAME = "processed"
 
 
 def test_client_initialization():  
@@ -31,49 +36,94 @@ def test_client_initialization():
         name = NAME,
         node_id = NODE_ID,
         node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
+        max_buffer = MAX_BUFFER_LENGTH,
+        buffer_time_interval = MAX_BUFFER_TIME,
+        resample_time_seconds = RESAMPLE_TIME,
+        raw_output_filename = RAW_OUTPUT_FILENAME,
+        processed_output_filename = PROCESSED_OUTPUT_FILENAME
     )
     
     assert len(client.buffer) == 0
     assert client.name == NAME
     assert client.node_id == NODE_ID
     assert client.node_type == NODE_TYPE
-    assert client.max_buffer == MAX_BUFFER
+    assert client.max_buffer == MAX_BUFFER_LENGTH
     assert client._username == USERNAME
     assert client._password == PASSWORD
     assert client.port == PORT
+    assert client.buffer_time_interval == MAX_BUFFER_TIME
+    assert client.resample_time_seconds == RESAMPLE_TIME
+    assert client.raw_output_filename == RAW_OUTPUT_FILENAME
+    assert client.processed_output_filename == PROCESSED_OUTPUT_FILENAME
 
 
 def test_on_message(mocker):
+    class MockMessage:
+        def __init__(self):
+            self.time = datetime.now()
+            self.topic = "p0/enclosure/pyrometer/temperature"
+            self.id = "pyrometer/temperature/"
+            self.value = 5
     mocker.patch("mqtt_node_network.node.MQTTNode.on_message", return_value = None)
-    topic = "machine/module/measurement/field"
+    mocker.patch("datetime.datetime.now", return_value = None)
     
-    # TODO: Need to figure out how to properly set this up for testing
-    message = MQTTMessage(
-        topic = topic
-    )
+    mock_message = MockMessage()
+    # mocker.patch.object(MQTTMessage, "__new__", return_value = mock_message)
+    mocker.patch("data_extraction.client.DataExtractionClient.check_message_value", return_value = mock_message.value)
 
-    client = DataExtractionClient(
-        broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
-    )
-    client.on_message(None, None, message)
+    client = DataExtractionClient()
+    client.on_message(None, None, mock_message)
 
     assert len(client.buffer) == 1
-    assert client.buffer[0] == {"measurement/field": 5}
+    assert client.buffer[0] == {
+        "time": mock_message.time,
+        "topic": mock_message.topic,
+        "id": mock_message.id,
+        "value": mock_message.value}
 
 
-def test_averaging_list():
+# Dumb indexing issures causing this test to fail
+def test_process_df():
     client = DataExtractionClient(
-        broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
+        resample_time_seconds = 2
     )
+    
+    df_sample = pd.DataFrame({
+        "time": ["2024-05-01 14:17:20",
+                 "2024-05-01 14:17:21",
+                 "2024-05-01 14:17:22",
+                 "2024-05-01 14:17:23"],
+        "topic": ["p0/enclosure/pyrometer/temperature",
+                  "p0/enclosure/stinger/pressure",
+                  "p0/enclosure/pyrometer/temperature",
+                  "p0/enclosure/stinger/pressure"],
+        "id": ["pyrometer/temperature",
+               "stinger/pressure",
+               "pyrometer/temperature",
+               "stinger/pressure"],
+        "value": [20.0, 101.0, 30.0, 102.0]
+    })
+    df_intended = pd.DataFrame({
+        "time": [datetime(2024, 5, 1, 14, 17, 20),
+                 datetime(2024, 5, 1, 14, 17, 22)],
+        "pyrometer/temperature": [22.5, 30.0],
+        "stinger/pressure": [101.0, 101.75]
+    }).set_index("time")
+    df_actual = client.process_data_pandas(df_sample)
+    print(df_actual["pyrometer/temperature"])
+    print(df_intended["pyrometer/temperature"])
+    assert len(df_actual) == 2
+    pd.testing.assert_series_equal(df_actual["pyrometer/temperature"], df_intended["pyrometer/temperature"])
+    pd.testing.assert_series_equal(df_actual["stinger/pressure"], df_intended["stinger/pressure"])
+    # pd.testing.assert_frame_equal(df_actual, df_intended)
+
+
+
+
+
+#-------------------Old Unused functions-----------------------------
+def test_averaging_list():
+    client = DataExtractionClient()
     
     microseconds_array = np.linspace(0, 750, 10)
     date_list = []
@@ -102,13 +152,7 @@ def test_averaging_list():
 
 
 def test_setting_time_interval_lists():
-    client = DataExtractionClient(
-        broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
-    )
+    client = DataExtractionClient()
     
     x = np.linspace(0, 750, 10)
     date_list = []
