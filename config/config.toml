@@ -1,7 +1,7 @@
 secrets_filepath = ".env"
 
 [mqtt.broker]
-hostname = "gfyvrdatadash"
+hostname = "emqx-broker"
 port = 1_883
 
 [mqtt.node_network]
@@ -12,7 +12,7 @@ prometheus_port = 8_000
 [data_extraction]
 name = "data_extraction"
 node_id = "data_extraction"
-id_structure = "measurement/field"
+id_structure = "measurement/field*"
 max_buffer_length = 100
 max_buffer_time = 10
 resample_time = 1

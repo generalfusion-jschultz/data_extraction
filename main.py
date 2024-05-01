@@ -11,11 +11,11 @@ from data_extraction.client import DataExtractionClient
 
 def main():
     client = DataExtractionClient()
-    # client.connect()
-    # client.subscribe(topic = "prototype-zero/#")
-    # client.run()
+    client.connect()
+    client.subscribe(topic = "prototype-zero/#")
+    client.run()
 
-    client.end_of_day(2024, 5, 1)    
+    # client.end_of_day(2024, 5, 1)    
 
 
 if __name__ == "__main__":

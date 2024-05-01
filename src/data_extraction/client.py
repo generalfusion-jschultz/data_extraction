@@ -54,6 +54,7 @@ class DataExtractionClient(MQTTClient):
             buffer_time_interval: int = MAX_BUFFER_TIME,
             subscriptions: str | list[str] = SUBSCRIPTIONS,  # Currently unused
             topic_structure: str = TOPIC_STRUCTURE,
+            id_structure: str = ID_STRUCTURE,
             raw_output_filename: str = RAW_OUTPUT_FILENAME,
             processed_output_filename: str = PROCESSED_FILENAME
         ):
@@ -74,16 +75,26 @@ class DataExtractionClient(MQTTClient):
         self.buffer_time_interval = buffer_time_interval
         self.raw_output_filename = raw_output_filename
         self.processed_output_filename = processed_output_filename
+        self.id_structure = id_structure
 
 
     def on_message(self, client, userdata, message: MQTTMessage):
         MQTTNode.on_message(self, client, userdata, message)
         
         # Maybe call parse_topic function from parent class
-        topic = message.topic
-        field = message.topic.split("/")[3]
-        measurement = message.topic.split("/")[2]
-        field_id = measurement + "/" + field
+        message_topic_breakdown = message.topic.split("/")
+        topic_structure_breakdown = self.topic_structure.split("/")
+        id_breakdown = self.id_structure.split("/")
+        topic_template: dict = {}
+
+        for (topic_subsection, message_subsection) in zip(topic_structure_breakdown, message_topic_breakdown):
+            topic_template.update({topic_subsection: message_subsection})
+
+        field_id = ""
+        for (index, id_subsection) in enumerate(id_breakdown):
+            field_id += topic_template.get(id_subsection)
+            if index != len(topic_template) - 1:
+                field_id += "/"
 
         if message.payload is None:
             logger.debug(
