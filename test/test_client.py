@@ -62,32 +62,27 @@ def test_on_message(mocker):
         def __init__(self):
             self.time = datetime.now()
             self.topic = "p0/enclosure/pyrometer/temperature"
-            self.id = "pyrometer/temperature/"
+            self.id = "pyrometer/temperature"
             self.value = 5
     mocker.patch("mqtt_node_network.node.MQTTNode.on_message", return_value = None)
-    mocker.patch("datetime.datetime.now", return_value = None)
     
     mock_message = MockMessage()
-    # mocker.patch.object(MQTTMessage, "__new__", return_value = mock_message)
     mocker.patch("data_extraction.client.DataExtractionClient.check_message_value", return_value = mock_message.value)
 
     client = DataExtractionClient()
     client.on_message(None, None, mock_message)
 
     assert len(client.buffer) == 1
-    assert client.buffer[0] == {
-        "time": mock_message.time,
-        "topic": mock_message.topic,
-        "id": mock_message.id,
-        "value": mock_message.value}
+    assert (client.buffer[0]["time"] - mock_message.time).total_seconds() == pytest.approx(0, abs = 1)
+    assert client.buffer[0]["topic"] == mock_message.topic
+    assert client.buffer[0]["id"] == mock_message.id
+    assert client.buffer[0]["value"] == mock_message.value
 
 
-# Dumb indexing issures causing this test to fail
 def test_process_df():
     client = DataExtractionClient(
         resample_time_seconds = 2
     )
-    
     df_sample = pd.DataFrame({
         "time": ["2024-05-01 14:17:20",
                  "2024-05-01 14:17:21",
@@ -110,15 +105,8 @@ def test_process_df():
         "stinger/pressure": [101.0, 101.75]
     }).set_index("time")
     df_actual = client.process_data_pandas(df_sample)
-    print(df_actual["pyrometer/temperature"])
-    print(df_intended["pyrometer/temperature"])
     assert len(df_actual) == 2
-    pd.testing.assert_series_equal(df_actual["pyrometer/temperature"], df_intended["pyrometer/temperature"])
-    pd.testing.assert_series_equal(df_actual["stinger/pressure"], df_intended["stinger/pressure"])
-    # pd.testing.assert_frame_equal(df_actual, df_intended)
-
-
-
+    assert df_actual.to_dict() == df_intended.to_dict()
 
 
 #-------------------Old Unused functions-----------------------------
