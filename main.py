@@ -17,7 +17,6 @@ import pandas as pd
 #       - Resampling the interpolated data at rates < 1s gives sparse results
 #           - Might be due to being lower frequency than publish rate?
 #           - Might need to resample first then interpolate?
-#       - on_message still gives an id with a trailing '/'
 
 def main():
     client = DataExtractionClient()

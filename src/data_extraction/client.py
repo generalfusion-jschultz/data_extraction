@@ -133,7 +133,7 @@ class DataExtractionClient(MQTTClient):
         field_id = ""
         for (index, id_subsection) in enumerate(id_breakdown):
             field_id += topic_template.get(id_subsection)
-            if index != (len(topic_template) - 1):
+            if index != (len(id_breakdown) - 1):
                 field_id += "/"
 
         data = {
@@ -197,9 +197,9 @@ class DataExtractionClient(MQTTClient):
 
 
     def end_of_day(self, year, month, day) -> None:
-        df = pd.read_csv(f"./output/{self.raw_output_filename}_{year}_{month}_{day}.csv")
+        df = pd.read_csv(f"output/{self.raw_output_filename}_{year}_{month}_{day}.csv")
         df = self.process_data_pandas(df)
-        filename = f"./processed_output/{self.processed_output_filename}"
+        filename = f"processed_output/{self.processed_output_filename}"
         self.start_time = datetime.now()
         self.write_to_file(df, filename)
 
@@ -224,9 +224,11 @@ class DataExtractionClient(MQTTClient):
         compare_time = datetime.now()
         while True:
             current_buffer_length = len(self.buffer)
-            if (current_buffer_length > self.max_buffer) or ((datetime.now() - compare_time).total_seconds() > self.buffer_time_interval):
+            buffer_length_exceeded = current_buffer_length > self.max_buffer
+            buffer_time_exceeded = (datetime.now() - compare_time).total_seconds() > self.buffer_time_interval
+            if buffer_length_exceeded or (buffer_time_exceeded and self.buffer):
                 update_list = [self.buffer.popleft() for i in range(current_buffer_length)]
-                self.update_csv(update_list, filename = f"./output/{self.raw_output_filename}")
+                self.update_csv(update_list, filename = f"output/{self.raw_output_filename}")
                 compare_time = datetime.now()
 
             time.sleep(1)

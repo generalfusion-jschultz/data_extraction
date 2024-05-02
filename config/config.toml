@@ -1,8 +1,8 @@
 secrets_filepath = ".env"
 
 [mqtt.broker]
-# hostname = "emqx-broker"  # For running as docker container
-hostname = "gfyvrdatadash"
+hostname = "emqx-broker"  # For running as docker container
+# hostname = "gfyvrdatadash"
 port = 1_883
 
 [mqtt.node_network]
