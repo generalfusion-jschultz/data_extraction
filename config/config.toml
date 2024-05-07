@@ -13,12 +13,16 @@ prometheus_port = 8_000
 [data_extraction]
 name = "data_extraction"
 node_id = "data_extraction"
-id_structure = "measurement/field*"
 max_buffer_length = 100
 max_buffer_time = 10
-resample_time = 1
-raw_ouput_filename = "topics"
-processed_output_filename = "prototype-zero"
 subscriptions = [
     "prototype-zero/#"
 ]
+id_structure = "measurement/field*"
+resample_time = 1
+nan_limit = 4
+ouput_filename = "topics"
+output_directory = "output"
+processed_output_filename = "prototype-zero"
+processed_output_directory = "processed_output"
+

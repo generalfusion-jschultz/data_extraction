@@ -9,6 +9,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./output:/app/output
+      - ./processed_output:/app/processed_output
       - ./config:/app/config
       - /etc/localtime:/etc/localtime:ro # sync timezone with host machine
     command: ["python", "main.py"]
