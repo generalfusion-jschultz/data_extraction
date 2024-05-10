@@ -8,14 +8,15 @@
 """Subscribes to published MQTT nodes and periodically writes them to a csv file."""
 # ---------------------------------------------------------------------------
 from data_extraction.client import DataExtractionClient
+from datetime import datetime
+# https://github.com/generalmattza/buffered
 
 def main():
     client = DataExtractionClient()
     client.connect()
-    client.subscribe(topic = "prototype-zero/#")
-    client.run()
-
-    # client.end_of_day(2024, 5, 1)    
+    # client.subscribe(topic = "prototype-zero/#")
+    # client.start_time = datetime(2024,5,7)
+    client.run() 
 
 
 if __name__ == "__main__":

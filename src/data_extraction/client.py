@@ -10,92 +10,103 @@
 from mqtt_node_network.node import MQTTNode
 from mqtt_node_network.client import (MQTTClient, MQTTBrokerConfig)
 from mqtt_node_network.initialize import initialize
-from mqtt_node_network.configure import load_config
 from paho.mqtt.client import MQTTMessage
+from buffered.buffer import Buffer
 
 import time
 from datetime import datetime
 import pandas as pd
-import polars as pl
 import os
 from threading import (Thread, Lock)
 import json
 import logging
 from collections import deque
+from dataclasses import dataclass
 
 
 config = initialize(
     config="./config/config.toml", secrets=".env", logger="./config/logger.yaml"
 )
-BROKER_CONFIG = config["mqtt"]["broker"]
-TOPIC_STRUCTURE = config["mqtt"]["node_network"]["topic_structure"]
-
-CLIENT_NAME = config["data_extraction"]["name"]
-CLIENT_NODE_ID = config["data_extraction"]["node_id"]
-ID_STRUCTURE = config["data_extraction"]["id_structure"]
-MAX_BUFFER_LENGTH = config["data_extraction"]["max_buffer_length"]
-MAX_BUFFER_TIME = config["data_extraction"]["max_buffer_time"]
-RESAMPLE_TIME = config["data_extraction"]["resample_time"]
-RAW_OUTPUT_FILENAME = config["data_extraction"]["raw_ouput_filename"]
-PROCESSED_FILENAME = config["data_extraction"]["processed_output_filename"]
-SUBSCRIPTIONS = config["data_extraction"]["subscriptions"]
-
 logger = logging.getLogger("__name__")
+BROKER_CONFIG = config["mqtt"]["broker"]
+
+
+@dataclass
+class DataExtractionConfig():
+    name: str
+    node_id: str
+    max_buffer_length: int
+    max_buffer_time: float
+    subscriptions: str | list[str]
+    topic_structure: str
+    id_structure: str
+    resample_time: float
+    nan_limit: int
+    output_filename: str
+    output_directory: str
+    processed_output_filename: str
+    processed_output_directory: str
+
+    def __post_init__(self):
+        if not isinstance(self.max_buffer_length, int):
+            raise TypeError("max_buffer_length needs to be an integer")
+        if not isinstance(self.nan_limit, int):
+            raise TypeError("nan_limit needs to be an integer")
+
+
+EXTRACTION_CONFIG = DataExtractionConfig(
+    name = config["data_extraction"]["name"],
+    node_id = config["data_extraction"]["node_id"],
+    max_buffer_length = config["data_extraction"]["max_buffer_length"],
+    max_buffer_time = config["data_extraction"]["max_buffer_time"],
+    subscriptions = config["data_extraction"]["subscriptions"],
+    topic_structure = config["mqtt"]["node_network"]["topic_structure"],
+    id_structure = config["data_extraction"]["id_structure"],
+    resample_time = config["data_extraction"]["resample_time"],
+    nan_limit = config["data_extraction"]["nan_limit"],
+    output_filename = config["data_extraction"]["ouput_filename"],
+    output_directory = config["data_extraction"]["output_directory"],
+    processed_output_filename = config["data_extraction"]["processed_output_filename"],
+    processed_output_directory = config["data_extraction"]["processed_output_directory"]
+)
+
 
 class DataExtractionClient(MQTTClient):
     def __init__(
             self,
             broker_config: MQTTBrokerConfig = BROKER_CONFIG,
-            name: str = CLIENT_NAME,
-            node_id: str = CLIENT_NODE_ID,
-            node_type = None,
-            max_buffer: int = MAX_BUFFER_LENGTH,
-            resample_time_seconds: float = RESAMPLE_TIME,
-            buffer_time_interval: int = MAX_BUFFER_TIME,
-            subscriptions: str | list[str] = SUBSCRIPTIONS,  # Currently unused
-            topic_structure: str = TOPIC_STRUCTURE,
-            id_structure: str = ID_STRUCTURE,
-            raw_output_filename: str = RAW_OUTPUT_FILENAME,
-            processed_output_filename: str = PROCESSED_FILENAME
+            data_extraction_config = EXTRACTION_CONFIG,
+            logger = None
         ):
         MQTTClient.__init__(
             self,
             broker_config = broker_config,
-            name = name,
-            node_id = node_id,
-            node_type = node_type,
-            logger = None,
-            buffer = deque(),
-            topic_structure = topic_structure,
+            name = data_extraction_config.name,
+            node_id = data_extraction_config.node_id,
+            node_type = None,
+            logger = logger,
+            buffer = Buffer(maxlen = 10_000),
+            topic_structure = data_extraction_config.topic_structure,
         )
         self.start_time = datetime.now()
         self.lock = Lock()
-        self.max_buffer = max_buffer
-        self.resample_time_seconds = resample_time_seconds
-        self.buffer_time_interval = buffer_time_interval
-        self.raw_output_filename = raw_output_filename
-        self.processed_output_filename = processed_output_filename
-        self.id_structure = id_structure
+        self.max_buffer = data_extraction_config.max_buffer_length
+        self.resample_time_seconds = data_extraction_config.resample_time
+        self.buffer_time_interval = data_extraction_config.max_buffer_time
+        self.output_filename = data_extraction_config.output_filename
+        self.processed_filename = data_extraction_config.processed_output_filename
+        self.id_structure = data_extraction_config.id_structure
+        self.output_directory = data_extraction_config.output_directory
+        self.processed_directory = data_extraction_config.processed_output_directory
+        self.nan_limit = data_extraction_config.nan_limit
+        # self.subscribe(data_extraction_config.subscriptions)
+        self.sub_test = data_extraction_config.subscriptions
+
+        os.makedirs(self.output_directory, exist_ok=True)
+        os.makedirs(self.processed_directory, exist_ok=True)
 
 
-    def on_message(self, client, userdata, message: MQTTMessage):
-        MQTTNode.on_message(self, client, userdata, message)
-        
-        # Maybe call parse_topic function from parent class
-        message_topic_breakdown = message.topic.split("/")
-        topic_structure_breakdown = self.topic_structure.split("/")
-        id_breakdown = self.id_structure.split("/")
-        topic_template: dict = {}
-
-        for (topic_subsection, message_subsection) in zip(topic_structure_breakdown, message_topic_breakdown):
-            topic_template.update({topic_subsection: message_subsection})
-
-        field_id = ""
-        for (index, id_subsection) in enumerate(id_breakdown):
-            field_id += topic_template.get(id_subsection)
-            if index != len(topic_template) - 1:
-                field_id += "/"
-
+    def check_message_value(self, message: MQTTMessage):
         if message.payload is None:
             logger.debug(
                 f"Null message ignored. Received None on topic '{message.topic}'"
@@ -105,6 +116,7 @@ class DataExtractionClient(MQTTClient):
         elif isinstance(message.payload, bytes):
             value = message.payload.decode()
 
+        value = message.payload.decode()
         if value == "nan":
             logger.debug(
                 f"Null message ignored. Received 'nan' on topic '{message.topic}'"
@@ -128,57 +140,59 @@ class DataExtractionClient(MQTTClient):
                 f"Message is not a valid type. Received '{type(value)}' on topic '{message.topic}'"
             )
             return
+        
+        return value
+
+
+    def on_message(self, client, userdata, message: MQTTMessage):
+        MQTTNode.on_message(self, client, userdata, message)
+
+        value = self.check_message_value(message)
+        if value is None:
+            return
+        
+        # Maybe call parse_topic function from parent class
+        message_topic_breakdown = message.topic.split("/")
+        topic_structure_breakdown = self.topic_structure.split("/")
+        id_breakdown = self.id_structure.split("/")
+        topic_template: dict = {}
+
+        for (topic_subsection, message_subsection) in zip(topic_structure_breakdown, message_topic_breakdown):
+            topic_template.update({topic_subsection: message_subsection})
+
+        field_id = ""
+        for (index, id_subsection) in enumerate(id_breakdown):
+            field_id += topic_template.get(id_subsection)
+            if index != (len(id_breakdown) - 1):
+                field_id += "/"
 
         data = {
             "time": datetime.now(),
-            field_id: value
+            "topic": message.topic,
+            "id": field_id,
+            "value": value
         }
         self.buffer.append(data)
+
+
+    def connect(self):
+        MQTTClient.connect(self)
+        self.subscribe(self.sub_test)
 
 
     def run(self) -> None:
         eod_handle = Thread(target = self.end_of_day_thread)
         buffer_handle = Thread(target = self.manage_buffer_thread)
-
         eod_handle.start()
         buffer_handle.start()
-
         eod_handle.join()
         buffer_handle.join()
-
-        # while True:
-        #     time.sleep(0.05)
-
-
-        # while (datetime.now() - self.start_time).total_seconds() < 10:
-        # while True:
-        #     current_hour = datetime.now().hour
-        #     current_day = datetime.now().day
-        #     if (current_hour == 0) and (current_day != self.start_time.day):
-        #         if threading:
-        #             day_end_thread = Thread(target = self.end_of_day(self.buffer.copy()))
-        #             self.buffer.clear()
-        #             day_end_thread.start()
-        #         else:
-        #             self.end_of_day(self.buffer.copy())
-        #             self.buffer.clear()
-        #     if len(self.buffer) > self.max_buffer:
-        #         if threading:
-        #             update_file_thread = Thread(self.update_csv(self.buffer.copy()))
-        #             self.buffer.clear()
-        #             update_file_thread.start()
-        #         else:
-        #             self.update_csv(self.buffer.copy())
-        #             self.buffer.clear()
-        # self.process_data(self.buffer)
 
 
     #-------------Functions for creating final csv based off of csv full of topics-------------------------------
     def end_of_day_thread(self):
         while True:
-            current_hour = datetime.now().hour
-            current_day = datetime.now().day
-            if (current_hour == 0) and (current_day != self.start_time.day):
+            if datetime.now().day != self.start_time.day:
                 self.end_of_day(
                     self.start_time.year,
                     self.start_time.month,
@@ -187,76 +201,91 @@ class DataExtractionClient(MQTTClient):
             time.sleep(60)
 
 
+    def obtain_df(self, year, month, day) -> pd.DataFrame | None:
+        try:
+            df = pd.read_csv(f"{self.output_directory}/{self.output_filename}_{year}_{month}_{day}.csv")
+        except FileNotFoundError:
+            logger.info(f"{self.output_filename} file not found. No data to process.")
+            return None
+        except pd.errors.EmptyDataError as error:
+            logger.info(f"Error reading {self.output_filename}: {error}")
+            return None
+        else:
+            return df
+
+
     def end_of_day(self, year, month, day) -> None:
-        df = pd.read_csv(f"./output/{self.raw_output_filename}_{year}_{month}_{day}.csv")
-        df["time"] = pd.to_datetime(df["time"])
+        df = self.obtain_df(year, month, day)
+        if df is None:
+            return
         df = self.process_data_pandas(df)
-        filename = f"./processed_output/{self.processed_output_filename}"
+        os.makedirs(self.processed_directory, exist_ok=True)
+        filename = f"{self.processed_directory}/{self.processed_filename}_{year}_{month}_{day}.csv"
         self.start_time = datetime.now()
         self.write_to_file(df, filename)
+
+
+    def interp_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        df["time"] = pd.to_datetime(df["time"])
+        df = df.drop(columns = "topic")
+        df = df.pivot(index = "time", columns = ["id"], values = "value")
+        df = df.interpolate(method = "time", limit = self.nan_limit)
+        return df
+    
+    
+    def resample_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.resample(rule = f"{self.resample_time_seconds}s").mean()
+        df = df.dropna(axis = 0, how = "all")
+        return df
 
 
     # Look into this for interpolating with conditions:
     #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
     def process_data_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
         start = time.perf_counter()
-        df = df.interpolate()
-        df = df.resample(rule = f'{self.resample_time_seconds}s', on = "time")
-        df = df.mean()
+        df = self.interp_df(df)
+        df = self.resample_df(df)
         stop = time.perf_counter()
         performance_time = stop - start
-        print(f"Pandas performance time: {performance_time}")
+        logger.info(f"Pandas performance time: {performance_time}")
         return df
 
-    # TODO: Results are scuffed with how the group_by_dynamics function works?
-    def process_data_polars(self, buffer: deque[dict]) -> pl.DataFrame:
-        start = time.perf_counter()
-        df = pl.DataFrame(buffer)
-        print("Raw Polars df:")
-        print(df)
-        df = df.interpolate().set_sorted("time")
-        df = df.group_by_dynamic("time", every = f"{self.resample_time_seconds}s").agg(pl.exclude("time")).mean()
-        stop = time.perf_counter()
-        performance_time = stop - start
-        print("Final Polars df: ")
-        print(df)
-        print(f"Polars performance time: {performance_time}")
-        return df
-    
 
     #--------------Functions for updating csv with topics when buffer fills up-----------------------------------
     def manage_buffer_thread(self):
         compare_time = datetime.now()
         while True:
-            current_buffer_length = len(self.buffer)
-            if (current_buffer_length > self.max_buffer) or ((datetime.now() - compare_time).total_seconds() > self.buffer_time_interval):
-                update_list = [self.buffer.popleft() for i in range(current_buffer_length)]
-                self.update_csv(update_list, filename = f"./output/{self.raw_output_filename}")
+            buffer_time_exceeded = (datetime.now() - compare_time).total_seconds() > self.buffer_time_interval
+            if (self.buffer.size() > self.max_buffer) or (buffer_time_exceeded and self.buffer.not_empty()):
+                self.dump_buffer_to_csv()
                 compare_time = datetime.now()
-
             time.sleep(1)
 
     
+    def dump_buffer_to_csv(self):
+        # update_list = [self.buffer.popleft() for i in range(len(self.buffer))]
+        os.makedirs(self.output_directory, exist_ok=True)
+        filename = f"{self.output_directory}/{self.output_filename}_{self.start_time.year}_{self.start_time.month}_{self.start_time.day}.csv"
+        self.update_csv(self.buffer.dump(), filename)
+
     #---------------Write to csv functions-----------------------------------------------------------------------
-    def update_csv(self, update_list: deque[dict], filename: str, use_polars: bool = False) -> None:
-        if use_polars:
-            df = pl.DataFrame(update_list)
+    def update_csv(self, update_list: deque[dict], filename: str) -> None:
+        df = pd.DataFrame(update_list)
+        self.write_to_file(df, filename, append = True)
+
+
+    def write_to_file(
+            self,
+            df: pd.DataFrame,
+            filename: str,
+            append: bool = False
+        ) -> None:
+        output_path = filename
+
+        if append:
+            df.to_csv(output_path, mode = 'a', header = not os.path.exists(output_path), index = False)
         else:
-            df = pd.DataFrame(update_list)
-        self.write_to_file(df, filename)
-
-
-    def write_to_file(self, df: pd.DataFrame | pl.DataFrame, filename: str) -> None:
-        year = self.start_time.year
-        month = self.start_time.month
-        day = self.start_time.day
-        output_path = filename + f"_{year}_{month}_{day}.csv"
-
-        if isinstance(df, pd.DataFrame):
-            df.to_csv(output_path, mode = 'a', header = not os.path.exists(output_path))
-        # TODO: Need to implement appending to the file if it already exists for Polars
-        elif isinstance(df, pl.DataFrame):
-            df.write_csv(output_path)
+            df.to_csv(output_path)
 
 
     #-----------------------Currently unused---------------------------------------------------------------------

@@ -1,79 +1,335 @@
 import pytest
-from data_extraction.client import DataExtractionClient
+from data_extraction.client import (DataExtractionClient, DataExtractionConfig)
 from mqtt_node_network.client import MQTTBrokerConfig
 from datetime import datetime
 import numpy as np
 import pandas as pd
 from paho.mqtt.client import MQTTMessage
 
-USERNAME = "test_user"
-PASSWORD = "test_password"
-HOSTNAME = "test_host"
-PORT = 1883
+
 BROKER_CONFIG = MQTTBrokerConfig(
-    username = USERNAME,
-    password = PASSWORD,
+    username ="test_user",
+    password = "test_password",
     keepalive = 60,
-    hostname = HOSTNAME,
-    port = PORT,
+    hostname = "test_host",
+    port = 1883,
     timeout = 1,
     reconnect_attempts = 3
 )
-NAME = "test_name"
-NODE_ID = "test_node_id"
-NODE_TYPE = "test_node_type"
-MAX_BUFFER = 1000
 
+EXTRACTION_CONFIG = DataExtractionConfig(
+    name = "test_name",
+    node_id = "test_node_id",
+    max_buffer_length = 1000,
+    max_buffer_time = 10,
+    subscriptions = None,
+    topic_structure = "machine/permission/category/module/measurement/field*",
+    id_structure = "category/measurement/field*",
+    resample_time = 1,
+    nan_limit = 4,
+    output_filename = "test",
+    output_directory = "test/test_files",
+    processed_output_filename = "p0_test",
+    processed_output_directory = "test/test_files"
+)
 
-def test_client_initialization():  
+@pytest.fixture
+def client() -> DataExtractionClient:
     client = DataExtractionClient(
         broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
+        data_extraction_config = EXTRACTION_CONFIG
     )
-    
+    return client
+
+
+def test_client_initialization(client):  
     assert len(client.buffer) == 0
-    assert client.name == NAME
-    assert client.node_id == NODE_ID
-    assert client.node_type == NODE_TYPE
-    assert client.max_buffer == MAX_BUFFER
-    assert client._username == USERNAME
-    assert client._password == PASSWORD
-    assert client.port == PORT
+    assert client.buffer.empty() is True
+    assert client.name == EXTRACTION_CONFIG.name
+    assert client.node_id == EXTRACTION_CONFIG.node_id
+    assert client.max_buffer == EXTRACTION_CONFIG.max_buffer_length
+    assert client._username == BROKER_CONFIG.username
+    assert client._password == BROKER_CONFIG.password
+    assert client.port == BROKER_CONFIG.port
+    assert client.buffer_time_interval == EXTRACTION_CONFIG.max_buffer_time
+    assert client.resample_time_seconds == EXTRACTION_CONFIG.resample_time
+    assert client.output_filename == EXTRACTION_CONFIG.output_filename
+    assert client.processed_filename == EXTRACTION_CONFIG.processed_output_filename
+    assert client.output_directory == EXTRACTION_CONFIG.output_directory
+    assert client.processed_directory == EXTRACTION_CONFIG.processed_output_directory
+    assert client.nan_limit == EXTRACTION_CONFIG.nan_limit
 
 
-def test_on_message(mocker):
+def test_on_message(mocker, client):
+    class MockMessage:
+        def __init__(self):
+            self.time = datetime.now()
+            self.topic = "p0/normal/sensor/enclosure/pyrometer/temperature"
+            self.id = "sensor/pyrometer/temperature"
+            self.value = 5
     mocker.patch("mqtt_node_network.node.MQTTNode.on_message", return_value = None)
-    topic = "machine/module/measurement/field"
     
-    # TODO: Need to figure out how to properly set this up for testing
-    message = MQTTMessage(
-        topic = topic
-    )
-
-    client = DataExtractionClient(
-        broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
-    )
-    client.on_message(None, None, message)
+    mock_message = MockMessage()
+    mocker.patch("data_extraction.client.DataExtractionClient.check_message_value", return_value = mock_message.value)
+    client.on_message(None, None, mock_message)
 
     assert len(client.buffer) == 1
-    assert client.buffer[0] == {"measurement/field": 5}
+    assert (client.buffer[0]["time"] - mock_message.time).total_seconds() == pytest.approx(0, abs = 1)
+    assert client.buffer[0]["topic"] == mock_message.topic
+    assert client.buffer[0]["id"] == mock_message.id
+    assert client.buffer[0]["value"] == mock_message.value
 
 
+#----------Testing reading in files and processing the data------------
+def test_single_line_topics_file(client):
+    expected_results = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,1,15,0,0,0): 20.0
+        }
+    }
+    
+    df = client.obtain_df(2024, 5, 1)
+    df = client.process_data_pandas(df)
+    assert df.to_dict() == expected_results
+
+
+def assert_dicts(actual: dict[str, dict], expected: dict[str, dict], debug: bool = True) -> None:
+    for (column_id, column_values) in actual.items():
+        for (timestamp, value) in column_values.items():
+            if debug:
+                print(value, expected[column_id][timestamp])
+            if np.isnan(value):
+                assert np.isnan(expected[column_id][timestamp])
+            else:
+                assert value == pytest.approx(expected[column_id][timestamp], abs = 0.001)
+
+
+def test_nonexistent_topics_file(client):
+    df = client.end_of_day(2024, 4, 12)
+    assert df is None
+
+
+def test_standard_topics_file(client):
+    expected_interp = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,2,12,0,0,000000): 20.00,
+            datetime(2024,5,2,12,0,0,250000): 20.25,
+            datetime(2024,5,2,12,0,0,500000): 20.50,
+            datetime(2024,5,2,12,0,0,750000): 20.75,
+            datetime(2024,5,2,12,0,1,000000): 21.00,
+            datetime(2024,5,2,12,0,1,250000): 21.25,
+            datetime(2024,5,2,12,0,1,500000): 21.50,
+            datetime(2024,5,2,12,0,1,750000): 21.75,
+            datetime(2024,5,2,12,0,2,000000): 22.00,
+            datetime(2024,5,2,12,0,2,250000): 22.25,
+            datetime(2024,5,2,12,0,2,500000): 22.50,
+            datetime(2024,5,2,12,0,2,750000): 22.75,
+            datetime(2024,5,2,12,0,3,000000): 23.00,
+            datetime(2024,5,2,12,0,3,250000): 23.00,
+            datetime(2024,5,2,12,0,3,500000): 23.00,
+            datetime(2024,5,2,12,0,3,750000): 23.00,
+        },
+        "pyrometer/ir_02": {
+            datetime(2024,5,2,12,0,0,000000): np.nan,
+            datetime(2024,5,2,12,0,0,250000): 30.00,
+            datetime(2024,5,2,12,0,0,500000): 30.25,
+            datetime(2024,5,2,12,0,0,750000): 30.50,
+            datetime(2024,5,2,12,0,1,000000): 30.75,
+            datetime(2024,5,2,12,0,1,250000): 31.00,
+            datetime(2024,5,2,12,0,1,500000): 31.25,
+            datetime(2024,5,2,12,0,1,750000): 31.50,
+            datetime(2024,5,2,12,0,2,000000): 31.75,
+            datetime(2024,5,2,12,0,2,250000): 32.00,
+            datetime(2024,5,2,12,0,2,500000): 32.25,
+            datetime(2024,5,2,12,0,2,750000): 32.50,
+            datetime(2024,5,2,12,0,3,000000): 32.75,
+            datetime(2024,5,2,12,0,3,250000): 33.00,
+            datetime(2024,5,2,12,0,3,500000): 33.00,
+            datetime(2024,5,2,12,0,3,750000): 33.00,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,2,12,0,0,000000): np.nan,
+            datetime(2024,5,2,12,0,0,250000): np.nan,
+            datetime(2024,5,2,12,0,0,500000): 2.0,
+            datetime(2024,5,2,12,0,0,750000): 2.025,
+            datetime(2024,5,2,12,0,1,000000): 2.050,
+            datetime(2024,5,2,12,0,1,250000): 2.075,
+            datetime(2024,5,2,12,0,1,500000): 2.1,
+            datetime(2024,5,2,12,0,1,750000): 2.125,
+            datetime(2024,5,2,12,0,2,000000): 2.150,
+            datetime(2024,5,2,12,0,2,250000): 2.175,
+            datetime(2024,5,2,12,0,2,500000): 2.2,
+            datetime(2024,5,2,12,0,2,750000): 2.225,
+            datetime(2024,5,2,12,0,3,000000): 2.250,
+            datetime(2024,5,2,12,0,3,250000): 2.275,
+            datetime(2024,5,2,12,0,3,500000): 2.3,
+            datetime(2024,5,2,12,0,3,750000): 2.3,
+            },
+        "pressure/hornet": {
+            datetime(2024,5,2,12,0,0,000000): np.nan,
+            datetime(2024,5,2,12,0,0,250000): np.nan,
+            datetime(2024,5,2,12,0,0,500000): np.nan,
+            datetime(2024,5,2,12,0,0,750000): 1.0,
+            datetime(2024,5,2,12,0,1,000000): 1.025,
+            datetime(2024,5,2,12,0,1,250000): 1.050,
+            datetime(2024,5,2,12,0,1,500000): 1.075,
+            datetime(2024,5,2,12,0,1,750000): 1.1,
+            datetime(2024,5,2,12,0,2,000000): 1.125,
+            datetime(2024,5,2,12,0,2,250000): 1.150,
+            datetime(2024,5,2,12,0,2,500000): 1.175,
+            datetime(2024,5,2,12,0,2,750000): 1.2,
+            datetime(2024,5,2,12,0,3,000000): 1.225,
+            datetime(2024,5,2,12,0,3,250000): 1.250,
+            datetime(2024,5,2,12,0,3,500000): 1.275,
+            datetime(2024,5,2,12,0,3,750000): 1.3,
+        },
+    }
+    expected_resample = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,2,12,0,0): 20.375,
+            datetime(2024,5,2,12,0,1): 21.375,
+            datetime(2024,5,2,12,0,2): 22.375,
+            datetime(2024,5,2,12,0,3): 23.0,
+        },
+        "pyrometer/ir_02": {
+            datetime(2024,5,2,12,0,0,): 30.25,
+            datetime(2024,5,2,12,0,1,): 31.125,
+            datetime(2024,5,2,12,0,2,): 32.125,
+            datetime(2024,5,2,12,0,3,): 32.9375,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,2,12,0,0): 2.0125,
+            datetime(2024,5,2,12,0,1): 2.0875,
+            datetime(2024,5,2,12,0,2): 2.1875,
+            datetime(2024,5,2,12,0,3): 2.28125,
+            },
+        "pressure/hornet": {
+            datetime(2024,5,2,12,0,0): 1.0,
+            datetime(2024,5,2,12,0,1): 1.0625,
+            datetime(2024,5,2,12,0,2): 1.1625,
+            datetime(2024,5,2,12,0,3): 1.2625,
+        },
+    }
+
+    df = client.obtain_df(2024, 5, 2)
+    df = client.interp_df(df)
+    actual_interp = df.to_dict()
+    assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.resample_df(df).to_dict()
+    assert_dicts(actual_resample, expected_resample)
+
+
+def test_sparse_column_topics_file(client):
+    expected_interp = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,3,12,0,0,000000): 20.00,
+            datetime(2024,5,3,12,0,0,250000): 20.667,
+            datetime(2024,5,3,12,0,0,500000): 21.333,
+            datetime(2024,5,3,12,0,0,750000): 22.000,
+            datetime(2024,5,3,12,0,1,000000): 22.667,
+            datetime(2024,5,3,12,0,1,250000): np.nan,
+            datetime(2024,5,3,12,0,1,500000): np.nan,
+            datetime(2024,5,3,12,0,1,750000): np.nan,
+            datetime(2024,5,3,12,0,2,000000): np.nan,
+            datetime(2024,5,3,12,0,2,250000): np.nan,
+            datetime(2024,5,3,12,0,2,500000): np.nan,
+            datetime(2024,5,3,12,0,2,750000): np.nan,
+            datetime(2024,5,3,12,0,3,000000): np.nan,
+            datetime(2024,5,3,12,0,3,250000): np.nan,
+            datetime(2024,5,3,12,0,3,500000): np.nan,
+            datetime(2024,5,3,12,0,3,750000): 30.00,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,3,12,0,0,000000): np.nan,
+            datetime(2024,5,3,12,0,0,250000): 2.00,
+            datetime(2024,5,3,12,0,0,500000): 2.00,
+            datetime(2024,5,3,12,0,0,750000): 2.00,
+            datetime(2024,5,3,12,0,1,000000): 2.00,
+            datetime(2024,5,3,12,0,1,250000): 2.00,
+            datetime(2024,5,3,12,0,1,500000): 2.00,
+            datetime(2024,5,3,12,0,1,750000): 2.00,
+            datetime(2024,5,3,12,0,2,000000): 2.00,
+            datetime(2024,5,3,12,0,2,250000): 2.00,
+            datetime(2024,5,3,12,0,2,500000): 2.00,
+            datetime(2024,5,3,12,0,2,750000): 2.00,
+            datetime(2024,5,3,12,0,3,000000): 2.00,
+            datetime(2024,5,3,12,0,3,250000): 2.00,
+            datetime(2024,5,3,12,0,3,500000): 2.00,
+            datetime(2024,5,3,12,0,3,750000): 2.00,
+        },
+    }
+    expected_resample = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,3,12,0,0,000000): 21.00,
+            datetime(2024,5,3,12,0,1,000000): 22.667,
+            datetime(2024,5,3,12,0,2,000000): np.nan,
+            datetime(2024,5,3,12,0,3,000000): 30.00,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,3,12,0,0,000000): 2.0,
+            datetime(2024,5,3,12,0,1,000000): 2.0,
+            datetime(2024,5,3,12,0,2,000000): 2.0,
+            datetime(2024,5,3,12,0,3,000000): 2.0,
+        },
+    }
+    df = client.obtain_df(2024, 5, 3)
+    df = client.interp_df(df)
+    actual_interp = df.to_dict()
+    assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.resample_df(df).to_dict()
+    assert_dicts(actual_resample, expected_resample)
+ 
+
+def test_remove_nan_rows(client):
+    expected_interp = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,4,12,0,0,000000): 20.0,
+            datetime(2024,5,4,12,0,0,500000): 20.5,
+            datetime(2024,5,4,12,0,10,000000): 30.0,
+            datetime(2024,5,4,12,0,10,500000): 30.0,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,4,12,0,0,000000): np.nan,
+            datetime(2024,5,4,12,0,0,500000): 2.0,
+            datetime(2024,5,4,12,0,10,000000): 3.9,
+            datetime(2024,5,4,12,0,10,500000): 4.0,
+        },
+    }
+    expected_resample = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,4,12,0,0,000000): 20.25,
+            datetime(2024,5,4,12,0,10,000000): 30.0,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,4,12,0,0,000000): 2.0,
+            datetime(2024,5,4,12,0,10,000000): 3.95,
+        },
+    }
+    df = client.obtain_df(2024, 5, 4)
+    df = client.interp_df(df)
+    actual_interp = df.to_dict()
+    print(df)
+    assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.resample_df(df).to_dict()
+    print(df)
+    assert_dicts(actual_resample, expected_resample)
+
+
+def test_empty_topics_files(client):
+    df = client.obtain_df(2024,5,5)
+    assert df.size == 0
+    df = client.obtain_df(2024,5,6)
+    assert df is None
+
+
+def test_processed_csv_output(client):
+    pass
+    
+
+
+#-------------------Old Unused functions-----------------------------
 def test_averaging_list():
-    client = DataExtractionClient(
-        broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
-    )
+    client = DataExtractionClient()
     
     microseconds_array = np.linspace(0, 750, 10)
     date_list = []
@@ -102,13 +358,7 @@ def test_averaging_list():
 
 
 def test_setting_time_interval_lists():
-    client = DataExtractionClient(
-        broker_config = BROKER_CONFIG,
-        name = NAME,
-        node_id = NODE_ID,
-        node_type = NODE_TYPE,
-        max_buffer = MAX_BUFFER
-    )
+    client = DataExtractionClient()
     
     x = np.linspace(0, 750, 10)
     date_list = []
