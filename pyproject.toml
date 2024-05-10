@@ -1,5 +1,5 @@
 [project]
-name = "project_or_module_name"
+name = "data_extraction"
 description = "A_short_description"
 
 # If a project, then you can specify version here
