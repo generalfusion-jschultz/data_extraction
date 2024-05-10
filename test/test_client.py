@@ -22,7 +22,7 @@ EXTRACTION_CONFIG = DataExtractionConfig(
     node_id = "test_node_id",
     max_buffer_length = 1000,
     max_buffer_time = 10,
-    subscriptions = None,
+    subscriptions = "machine/#",
     topic_structure = "machine/permission/category/module/measurement/field*",
     id_structure = "category/measurement/field*",
     resample_time = 1,
@@ -58,6 +58,169 @@ def test_client_initialization(client):
     assert client.output_directory == EXTRACTION_CONFIG.output_directory
     assert client.processed_directory == EXTRACTION_CONFIG.processed_output_directory
     assert client.nan_limit == EXTRACTION_CONFIG.nan_limit
+
+
+def test_data_config_fails():
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = None,
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = "4",
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000.5,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = ['machine/#', 5],
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = 1,
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = 1,
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = 1,
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = 1,
+            processed_output_filename = "p0_test",
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = 1,
+            processed_output_directory = "test/test_files"
+        )
+    with pytest.raises(TypeError):
+        data_config = DataExtractionConfig(
+            name = "test_name",
+            node_id = "test_node_id",
+            max_buffer_length = 1000,
+            max_buffer_time = 10,
+            subscriptions = 'machine/#',
+            topic_structure = "machine/permission/category/module/measurement/field*",
+            id_structure = "category/measurement/field*",
+            resample_time = 1,
+            nan_limit = 4,
+            output_filename = "test",
+            output_directory = "test/test_files",
+            processed_output_filename = "p0_test",
+            processed_output_directory = 1
+        )
 
 
 def test_on_message(mocker, client):
@@ -320,6 +483,66 @@ def test_empty_topics_files(client):
     assert df.size == 0
     df = client.obtain_df(2024,5,6)
     assert df is None
+
+
+def test_single_topic_entry(client):
+    expected_interp = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,3,12,0,0,000000): np.nan,
+            datetime(2024,5,3,12,0,0,250000): np.nan,
+            datetime(2024,5,3,12,0,0,500000): np.nan,
+            datetime(2024,5,3,12,0,0,750000): np.nan,
+            datetime(2024,5,3,12,0,1,000000): np.nan,
+            datetime(2024,5,3,12,0,1,250000): np.nan,
+            datetime(2024,5,3,12,0,1,500000): np.nan,
+            datetime(2024,5,3,12,0,1,750000): np.nan,
+            datetime(2024,5,3,12,0,2,000000): 20.0,
+            datetime(2024,5,3,12,0,2,250000): 20.0,
+            datetime(2024,5,3,12,0,2,500000): 20.0,
+            datetime(2024,5,3,12,0,2,750000): 20.0,
+            datetime(2024,5,3,12,0,3,000000): 20.0,
+            datetime(2024,5,3,12,0,3,250000): np.nan,
+            datetime(2024,5,3,12,0,3,500000): np.nan,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,3,12,0,0,000000): 2.0,
+            datetime(2024,5,3,12,0,0,250000): 2.00,
+            datetime(2024,5,3,12,0,0,500000): 2.00,
+            datetime(2024,5,3,12,0,0,750000): 2.00,
+            datetime(2024,5,3,12,0,1,000000): 2.00,
+            datetime(2024,5,3,12,0,1,250000): 2.00,
+            datetime(2024,5,3,12,0,1,500000): 2.00,
+            datetime(2024,5,3,12,0,1,750000): 2.00,
+            datetime(2024,5,3,12,0,2,000000): 2.00,
+            datetime(2024,5,3,12,0,2,250000): 2.00,
+            datetime(2024,5,3,12,0,2,500000): 2.00,
+            datetime(2024,5,3,12,0,2,750000): 2.00,
+            datetime(2024,5,3,12,0,3,000000): 2.00,
+            datetime(2024,5,3,12,0,3,250000): 2.00,
+            datetime(2024,5,3,12,0,3,500000): 2.00,
+            datetime(2024,5,3,12,0,3,750000): 2.00,
+        },
+    }
+    expected_resample = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,3,12,0,0,000000): np.nan,
+            datetime(2024,5,3,12,0,1,000000): np.nan,
+            datetime(2024,5,3,12,0,2,000000): 20.0,
+            datetime(2024,5,3,12,0,3,000000): 20.0,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,3,12,0,0,000000): 2.0,
+            datetime(2024,5,3,12,0,1,000000): 2.0,
+            datetime(2024,5,3,12,0,2,000000): 2.0,
+            datetime(2024,5,3,12,0,3,000000): 2.0,
+        },
+    }
+    df = client.obtain_df(2024, 5, 7)
+    df = client.interp_df(df)
+    actual_interp = df.to_dict()
+    assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.resample_df(df).to_dict()
+    assert_dicts(actual_resample, expected_resample)
 
 
 def test_processed_csv_output(client):

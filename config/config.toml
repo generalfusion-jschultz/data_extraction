@@ -16,7 +16,7 @@ node_id = "data_extraction"
 max_buffer_length = 100
 max_buffer_time = 10
 subscriptions = [
-    "prototype-zero/#"
+    "prototype-zero/#",
 ]
 id_structure = "category/measurement/field*"
 resample_time = 1

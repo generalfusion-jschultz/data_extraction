@@ -49,9 +49,30 @@ class DataExtractionConfig():
 
     def __post_init__(self):
         if not isinstance(self.max_buffer_length, int):
-            raise TypeError("max_buffer_length needs to be an integer")
+            raise TypeError("max_buffer_length needs to be an integer.")
         if not isinstance(self.nan_limit, int):
-            raise TypeError("nan_limit needs to be an integer")
+            raise TypeError("nan_limit needs to be an integer.")
+        if not isinstance(self.topic_structure, str):
+            raise TypeError("topic_structure needs to be a string.")
+        if not isinstance(self.id_structure, str):
+            raise TypeError("id_structure needs to be a string.")
+        if not isinstance(self.output_directory, str):
+            raise TypeError("output_directory needs to be a string.")
+        if not isinstance(self.output_filename, str):
+            raise TypeError("output_filename needs to be a string.")
+        if not isinstance(self.processed_output_directory, str):
+            raise TypeError("processed_output_directory needs to be a string.")
+        if not isinstance(self.processed_output_filename, str):
+            raise TypeError("processed_output_filename needs to be a string.")
+        if not isinstance(self.resample_time, (int, float)):
+            raise TypeError("resample_time needs to be either an integer or float.")
+        if not isinstance(self.subscriptions, str):
+            if isinstance(self.subscriptions, list):
+                for subscription in self.subscriptions:
+                    if not isinstance(subscription, str):
+                        raise TypeError(f"Subscription: {subscription} is not a string.")
+            else:
+                raise TypeError("subscriptions need to be either a string or list of strings")
 
 
 EXTRACTION_CONFIG = DataExtractionConfig(
