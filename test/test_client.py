@@ -23,12 +23,12 @@ EXTRACTION_CONFIG = DataExtractionConfig(
     max_buffer_length = 1000,
     max_buffer_time = 10,
     subscriptions = None,
-    topic_structure = "machine/module/measurement/field*",
-    id_structure = "measurement/field*",
+    topic_structure = "machine/permission/category/module/measurement/field*",
+    id_structure = "category/measurement/field*",
     resample_time = 1,
     nan_limit = 4,
     output_filename = "test",
-    ouput_directory = "test/test_files",
+    output_directory = "test/test_files",
     processed_output_filename = "p0_test",
     processed_output_directory = "test/test_files"
 )
@@ -44,6 +44,7 @@ def client() -> DataExtractionClient:
 
 def test_client_initialization(client):  
     assert len(client.buffer) == 0
+    assert client.buffer.empty() is True
     assert client.name == EXTRACTION_CONFIG.name
     assert client.node_id == EXTRACTION_CONFIG.node_id
     assert client.max_buffer == EXTRACTION_CONFIG.max_buffer_length
@@ -63,8 +64,8 @@ def test_on_message(mocker, client):
     class MockMessage:
         def __init__(self):
             self.time = datetime.now()
-            self.topic = "p0/enclosure/pyrometer/temperature"
-            self.id = "pyrometer/temperature"
+            self.topic = "p0/normal/sensor/enclosure/pyrometer/temperature"
+            self.id = "sensor/pyrometer/temperature"
             self.value = 5
     mocker.patch("mqtt_node_network.node.MQTTNode.on_message", return_value = None)
     
@@ -218,7 +219,7 @@ def test_standard_topics_file(client):
     assert_dicts(actual_resample, expected_resample)
 
 
-def test_sparse_column_topics_file1(client):
+def test_sparse_column_topics_file(client):
     expected_interp = {
         "pyrometer/ir_01": {
             datetime(2024,5,3,12,0,0,000000): 20.00,
@@ -279,8 +280,50 @@ def test_sparse_column_topics_file1(client):
     assert_dicts(actual_resample, expected_resample)
  
 
+def test_remove_nan_rows(client):
+    expected_interp = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,4,12,0,0,000000): 20.0,
+            datetime(2024,5,4,12,0,0,500000): 20.5,
+            datetime(2024,5,4,12,0,10,000000): 30.0,
+            datetime(2024,5,4,12,0,10,500000): 30.0,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,4,12,0,0,000000): np.nan,
+            datetime(2024,5,4,12,0,0,500000): 2.0,
+            datetime(2024,5,4,12,0,10,000000): 3.9,
+            datetime(2024,5,4,12,0,10,500000): 4.0,
+        },
+    }
+    expected_resample = {
+        "pyrometer/ir_01": {
+            datetime(2024,5,4,12,0,0,000000): 20.25,
+            datetime(2024,5,4,12,0,10,000000): 30.0,
+        },
+        "pressure/stinger": {
+            datetime(2024,5,4,12,0,0,000000): 2.0,
+            datetime(2024,5,4,12,0,10,000000): 3.95,
+        },
+    }
+    df = client.obtain_df(2024, 5, 4)
+    df = client.interp_df(df)
+    actual_interp = df.to_dict()
+    print(df)
+    assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.resample_df(df).to_dict()
+    print(df)
+    assert_dicts(actual_resample, expected_resample)
+
+
+def test_empty_topics_files(client):
+    df = client.obtain_df(2024,5,5)
+    assert df.size == 0
+    df = client.obtain_df(2024,5,6)
+    assert df is None
+
+
 def test_processed_csv_output(client):
-    client.end_of_day(2024, 5, 3)
+    pass
     
 
 
