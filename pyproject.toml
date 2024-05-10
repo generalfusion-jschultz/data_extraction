@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
    "numpy",
    "mqtt-node-network @ git+https://github.com/generalmattza/mqtt-node-network.git",
+   "buffered @ git+https://github.com/generalmattza/buffered.git",
    "pandas",
    "paho-mqtt"
 ]

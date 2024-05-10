@@ -11,6 +11,7 @@ from mqtt_node_network.node import MQTTNode
 from mqtt_node_network.client import (MQTTClient, MQTTBrokerConfig)
 from mqtt_node_network.initialize import initialize
 from paho.mqtt.client import MQTTMessage
+from buffered.buffer import Buffer
 
 import time
 from datetime import datetime
@@ -84,7 +85,7 @@ class DataExtractionClient(MQTTClient):
             node_id = data_extraction_config.node_id,
             node_type = None,
             logger = logger,
-            buffer = deque(),
+            buffer = Buffer(maxlen = 10_000),
             topic_structure = data_extraction_config.topic_structure,
         )
         self.start_time = datetime.now()
@@ -98,6 +99,8 @@ class DataExtractionClient(MQTTClient):
         self.output_directory = data_extraction_config.output_directory
         self.processed_directory = data_extraction_config.processed_output_directory
         self.nan_limit = data_extraction_config.nan_limit
+        # self.subscribe(data_extraction_config.subscriptions)
+        self.sub_test = data_extraction_config.subscriptions
 
         os.makedirs(self.output_directory, exist_ok=True)
         os.makedirs(self.processed_directory, exist_ok=True)
@@ -172,49 +175,24 @@ class DataExtractionClient(MQTTClient):
         self.buffer.append(data)
 
 
+    def connect(self):
+        MQTTClient.connect(self)
+        self.subscribe(self.sub_test)
+
+
     def run(self) -> None:
         eod_handle = Thread(target = self.end_of_day_thread)
         buffer_handle = Thread(target = self.manage_buffer_thread)
-
         eod_handle.start()
         buffer_handle.start()
-
         eod_handle.join()
         buffer_handle.join()
-
-        # while True:
-        #     time.sleep(0.05)
-
-
-        # while (datetime.now() - self.start_time).total_seconds() < 10:
-        # while True:
-        #     current_hour = datetime.now().hour
-        #     current_day = datetime.now().day
-        #     if (current_hour == 0) and (current_day != self.start_time.day):
-        #         if threading:
-        #             day_end_thread = Thread(target = self.end_of_day(self.buffer.copy()))
-        #             self.buffer.clear()
-        #             day_end_thread.start()
-        #         else:
-        #             self.end_of_day(self.buffer.copy())
-        #             self.buffer.clear()
-        #     if len(self.buffer) > self.max_buffer:
-        #         if threading:
-        #             update_file_thread = Thread(self.update_csv(self.buffer.copy()))
-        #             self.buffer.clear()
-        #             update_file_thread.start()
-        #         else:
-        #             self.update_csv(self.buffer.copy())
-        #             self.buffer.clear()
-        # self.process_data(self.buffer)
 
 
     #-------------Functions for creating final csv based off of csv full of topics-------------------------------
     def end_of_day_thread(self):
         while True:
-            current_hour = datetime.now().hour
-            current_day = datetime.now().day
-            if (current_hour == 0) and (current_day != self.start_time.day):
+            if datetime.now().day != self.start_time.day:
                 self.end_of_day(
                     self.start_time.year,
                     self.start_time.month,
@@ -225,9 +203,12 @@ class DataExtractionClient(MQTTClient):
 
     def obtain_df(self, year, month, day) -> pd.DataFrame | None:
         try:
-            df = pd.read_csv(f"{self.raw_directory}/{self.raw_output_filename}_{year}_{month}_{day}.csv")
+            df = pd.read_csv(f"{self.output_directory}/{self.output_filename}_{year}_{month}_{day}.csv")
         except FileNotFoundError:
-            logger.info(f"{self.raw_output_filename} file not found. No data to process.")
+            logger.info(f"{self.output_filename} file not found. No data to process.")
+            return None
+        except pd.errors.EmptyDataError as error:
+            logger.info(f"Error reading {self.output_filename}: {error}")
             return None
         else:
             return df
@@ -253,7 +234,9 @@ class DataExtractionClient(MQTTClient):
     
     
     def resample_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df.resample(rule = f"{self.resample_time_seconds}s").mean()
+        df = df.resample(rule = f"{self.resample_time_seconds}s").mean()
+        df = df.dropna(axis = 0, how = "all")
+        return df
 
 
     # Look into this for interpolating with conditions:
@@ -272,19 +255,19 @@ class DataExtractionClient(MQTTClient):
     def manage_buffer_thread(self):
         compare_time = datetime.now()
         while True:
-            current_buffer_length = len(self.buffer)
-            buffer_length_exceeded = current_buffer_length > self.max_buffer
             buffer_time_exceeded = (datetime.now() - compare_time).total_seconds() > self.buffer_time_interval
-            if buffer_length_exceeded or (buffer_time_exceeded and self.buffer):
-                update_list = [self.buffer.popleft() for i in range(current_buffer_length)]
-                os.makedirs(self.output_directory, exist_ok=True)
-                filename = f"{self.output_directory}/{self.output_filename}_{self.start_time.year}_{self.start_time.month}_{self.start_time.day}.csv"
-                self.update_csv(update_list, filename)
+            if (self.buffer.size() > self.max_buffer) or (buffer_time_exceeded and self.buffer.not_empty()):
+                self.dump_buffer_to_csv()
                 compare_time = datetime.now()
-
             time.sleep(1)
 
     
+    def dump_buffer_to_csv(self):
+        # update_list = [self.buffer.popleft() for i in range(len(self.buffer))]
+        os.makedirs(self.output_directory, exist_ok=True)
+        filename = f"{self.output_directory}/{self.output_filename}_{self.start_time.year}_{self.start_time.month}_{self.start_time.day}.csv"
+        self.update_csv(self.buffer.dump(), filename)
+
     #---------------Write to csv functions-----------------------------------------------------------------------
     def update_csv(self, update_list: deque[dict], filename: str) -> None:
         df = pd.DataFrame(update_list)
