@@ -26,10 +26,11 @@ classifiers = [
 
 dependencies = [
    "numpy",
-   "mqtt-node-network @ git+https://github.com/generalmattza/mqtt-node-network.git",
+   "mqtt-node-network @ git+https://github.com/generalmattza/mqtt-node-network.git@v1.3.1",
    "buffered @ git+https://github.com/generalmattza/buffered.git",
    "pandas",
-   "paho-mqtt"
+   "paho-mqtt",
+   "psutil"
 ]
 
 # If a module, then use fetch version from src/module_name/__init__.py

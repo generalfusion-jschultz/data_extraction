@@ -10,8 +10,10 @@
 from mqtt_node_network.node import MQTTNode
 from mqtt_node_network.client import (MQTTClient, MQTTBrokerConfig)
 from mqtt_node_network.initialize import initialize
+from mqtt_node_network.configure import start_prometheus_server
 from paho.mqtt.client import MQTTMessage
 from buffered.buffer import Buffer
+from prometheus_client import Gauge
 
 import time
 from datetime import datetime
@@ -22,6 +24,7 @@ import json
 import logging
 from collections import deque
 from dataclasses import dataclass
+import psutil
 
 
 config = initialize(
@@ -93,6 +96,12 @@ EXTRACTION_CONFIG = DataExtractionConfig(
 
 
 class DataExtractionClient(MQTTClient):
+    client_memory_usage = Gauge(
+        "client_memory_usage",
+        "Program's memory usage in MB",
+        labelnames=("machine", "module", "measurement", "field"),
+    )
+    
     def __init__(
             self,
             broker_config: MQTTBrokerConfig = BROKER_CONFIG,
@@ -120,11 +129,37 @@ class DataExtractionClient(MQTTClient):
         self.output_directory = data_extraction_config.output_directory
         self.processed_directory = data_extraction_config.processed_output_directory
         self.nan_limit = data_extraction_config.nan_limit
-        # self.subscribe(data_extraction_config.subscriptions)
-        self.sub_test = data_extraction_config.subscriptions
+        self.sub_list = data_extraction_config.subscriptions
+
+        # Initializing threads
+        self.eod_handle = Thread(target = self.end_of_day_thread)
+        self.buffer_handle = Thread(target = self.manage_buffer_thread)
+        self.performance_handle = Thread(target = self.peformance_thread)
 
         os.makedirs(self.output_directory, exist_ok=True)
         os.makedirs(self.processed_directory, exist_ok=True)
+        start_prometheus_server()
+
+
+    def performance_thread(self) -> None:
+        while True:
+            self.performace()
+            time.sleep(10)
+
+
+    # https://psutil.readthedocs.io/en/latest/
+    # https://stackoverflow.com/questions/276052/how-to-get-current-cpu-and-ram-usage-in-python
+    def performace(self):
+        svmem = psutil.virtual_memory()
+        if svmem.percent >= 95:
+            # Stop condition
+            logger.critical(f"VM memory at {svmem.percent}%! Shutting down program.")
+        python_process = psutil.Process(os.getpid())
+        memory_usage = python_process.memory_info().rss / (1024*1024)  # MB
+        self.client_memory_usage.set(memory_usage)
+        if memory_usage > 1024:
+            # Stop condition
+            logger.critical(f"Memory leak! Memory usage at {memory_usage}MB. Shutting down program.")
 
 
     def check_message_value(self, message: MQTTMessage):
@@ -165,7 +200,7 @@ class DataExtractionClient(MQTTClient):
         return value
 
 
-    def on_message(self, client, userdata, message: MQTTMessage):
+    def on_message(self, client, userdata, message: MQTTMessage) -> None:
         MQTTNode.on_message(self, client, userdata, message)
 
         value = self.check_message_value(message)
@@ -177,6 +212,11 @@ class DataExtractionClient(MQTTClient):
         topic_structure_breakdown = self.topic_structure.split("/")
         id_breakdown = self.id_structure.split("/")
         topic_template: dict = {}
+
+        try:
+            assert len(message_topic_breakdown) == len(topic_structure_breakdown)
+        except AssertionError:
+            logger.warning("Topic structure and message structure lengths not equal. Check config file.")
 
         for (topic_subsection, message_subsection) in zip(topic_structure_breakdown, message_topic_breakdown):
             topic_template.update({topic_subsection: message_subsection})
@@ -196,9 +236,9 @@ class DataExtractionClient(MQTTClient):
         self.buffer.append(data)
 
 
-    def connect(self):
+    def connect(self) -> None:
         MQTTClient.connect(self)
-        self.subscribe(self.sub_test)
+        self.subscribe(self.sub_list)
 
 
     def run(self) -> None:
@@ -208,6 +248,25 @@ class DataExtractionClient(MQTTClient):
         buffer_handle.start()
         eod_handle.join()
         buffer_handle.join()
+
+        # self.eod_handle.start()
+        # self.buffer_handle.start()
+        # self.performance_handle.start()
+
+
+    def run_forever(self) -> None:
+        self.run()
+        while True:
+            time.sleep(1)
+
+    
+    def stop(self) -> None:
+        if self.eod_handle.is_alive():
+            self.eod_handle.join(timeout = 10)
+        if self.buffer_handle.is_alive():
+            self.buffer_handle.join(timeout = 10)
+        if self.performance_handle.is_alive():
+            self.performance_handle.join(timeout = 10)
 
 
     #-------------Functions for creating final csv based off of csv full of topics-------------------------------
@@ -353,3 +412,7 @@ class DataExtractionClient(MQTTClient):
         df = pd.DataFrame(buffer)
         print(df)
         return df
+
+
+    def __del__(self):
+        self.stop()

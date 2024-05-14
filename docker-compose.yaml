@@ -3,7 +3,7 @@ services:
   data_extraction:
     build:
       context: .
-    container_name: data_extraction
+    container_name: data_extraction_mqtt
     user: "1001"
     working_dir: /app
     volumes:

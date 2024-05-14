@@ -6,6 +6,20 @@ handlers:
     formatter: default
     level   : DEBUG
     stream  : ext://sys.stdout
+  data_extraction.info.file:
+    class : logging.handlers.RotatingFileHandler
+    formatter: default
+    level   : INFO
+    filename: logs/data_extraction.info.log
+    maxBytes: 10_000_000
+    backupCount: 7
+  data_extraction.debug.file:
+    class : logging.handlers.RotatingFileHandler
+    formatter: default
+    level   : DEBUG
+    filename: logs/data_extraction.debug.log
+    maxBytes: 10_000_000
+    backupCount: 7
   mqtt_node_network.debug.file:
     class : logging.handlers.RotatingFileHandler
     formatter: json
@@ -41,3 +55,10 @@ loggers:
       - console
       - mqtt_node_network.debug.file
       - mqtt_node_network.info.file
+
+  data_extraction:
+    level: DEBUG
+    handlers:
+      - console
+      - data_extraction.info.file
+      - data_extraction.debug.file
