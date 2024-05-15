@@ -3,7 +3,7 @@ services:
   data_extraction:
     build:
       context: .
-    container_name: data_extraction_mqtt
+    container_name: data-extractor-mqtt
     user: "1001"
     working_dir: /app
     volumes:
@@ -15,7 +15,11 @@ services:
     command: ["python", "main.py"]
     networks:
       - mqtt5-network
+      - metrics-network
 
 networks:
   mqtt5-network:
+    external: true
+
+  metrics-network:
     external: true

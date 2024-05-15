@@ -14,9 +14,8 @@ from datetime import datetime
 def main():
     client = DataExtractionClient()
     client.connect()
-    # client.subscribe(topic = "prototype-zero/#")
     # client.start_time = datetime(2024,5,7)
-    client.run() 
+    client.run_forever()
 
 
 if __name__ == "__main__":

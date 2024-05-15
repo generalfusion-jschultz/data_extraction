@@ -99,7 +99,6 @@ class DataExtractionClient(MQTTClient):
     client_memory_usage = Gauge(
         "client_memory_usage",
         "Program's memory usage in MB",
-        labelnames=("machine", "module", "measurement", "field"),
     )
     
     def __init__(
@@ -134,17 +133,18 @@ class DataExtractionClient(MQTTClient):
         # Initializing threads
         self.eod_handle = Thread(target = self.end_of_day_thread)
         self.buffer_handle = Thread(target = self.manage_buffer_thread)
-        self.performance_handle = Thread(target = self.peformance_thread)
+        self.performance_handle = Thread(target = self.performance_thread)
+        self.continue_flag: bool = True
 
         os.makedirs(self.output_directory, exist_ok=True)
         os.makedirs(self.processed_directory, exist_ok=True)
-        start_prometheus_server()
+        # start_prometheus_server(port = 8000)
 
 
     def performance_thread(self) -> None:
-        while True:
-            self.performace()
+        while self.continue_flag:
             time.sleep(10)
+            self.performace()
 
 
     # https://psutil.readthedocs.io/en/latest/
@@ -152,14 +152,17 @@ class DataExtractionClient(MQTTClient):
     def performace(self):
         svmem = psutil.virtual_memory()
         if svmem.percent >= 95:
-            # Stop condition
             logger.critical(f"VM memory at {svmem.percent}%! Shutting down program.")
+            self.continue_flag = False
         python_process = psutil.Process(os.getpid())
         memory_usage = python_process.memory_info().rss / (1024*1024)  # MB
+        # logger.debug(f"Memory usage: {memory_usage} MB")
+        print(f"Memory usage: {memory_usage} MB")
         self.client_memory_usage.set(memory_usage)
         if memory_usage > 1024:
-            # Stop condition
             logger.critical(f"Memory leak! Memory usage at {memory_usage}MB. Shutting down program.")
+            print(f"Memory leak! Memory usage at {memory_usage}MB. Shutting down program.")
+            self.continue_flag = False
 
 
     def check_message_value(self, message: MQTTMessage):
@@ -242,43 +245,38 @@ class DataExtractionClient(MQTTClient):
 
 
     def run(self) -> None:
-        eod_handle = Thread(target = self.end_of_day_thread)
-        buffer_handle = Thread(target = self.manage_buffer_thread)
-        eod_handle.start()
-        buffer_handle.start()
-        eod_handle.join()
-        buffer_handle.join()
-
-        # self.eod_handle.start()
-        # self.buffer_handle.start()
-        # self.performance_handle.start()
+        self.eod_handle.start()
+        self.buffer_handle.start()
+        self.performance_handle.start()
 
 
     def run_forever(self) -> None:
         self.run()
-        while True:
+        print("Threads started")
+        while self.continue_flag:
             time.sleep(1)
+        self.stop()
 
     
     def stop(self) -> None:
-        if self.eod_handle.is_alive():
-            self.eod_handle.join(timeout = 10)
         if self.buffer_handle.is_alive():
-            self.buffer_handle.join(timeout = 10)
+            self.buffer_handle.join()
         if self.performance_handle.is_alive():
-            self.performance_handle.join(timeout = 10)
+            self.performance_handle.join()
+        if self.eod_handle.is_alive():
+            self.eod_handle.join()
 
 
     #-------------Functions for creating final csv based off of csv full of topics-------------------------------
     def end_of_day_thread(self):
-        while True:
+        while self.continue_flag:
             if datetime.now().day != self.start_time.day:
                 self.end_of_day(
                     self.start_time.year,
                     self.start_time.month,
                     self.start_time.day
                 )
-            time.sleep(60)
+            time.sleep(30)
 
 
     def obtain_df(self, year, month, day) -> pd.DataFrame | None:
@@ -334,7 +332,7 @@ class DataExtractionClient(MQTTClient):
     #--------------Functions for updating csv with topics when buffer fills up-----------------------------------
     def manage_buffer_thread(self):
         compare_time = datetime.now()
-        while True:
+        while self.continue_flag:
             buffer_time_exceeded = (datetime.now() - compare_time).total_seconds() > self.buffer_time_interval
             if (self.buffer.size() > self.max_buffer) or (buffer_time_exceeded and self.buffer.not_empty()):
                 self.dump_buffer_to_csv()
