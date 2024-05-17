@@ -1,9 +1,11 @@
-# project_name
-### project_summary
+# data_exctraction
+### Backs MQTT subscription data on csv files
 
-project description
+This module subscribes to a given MQTT topics list and periodically backs data up to a csv file. At the end of the day it processes the csv file and outputs a formatted csv file of all the data.
 
 
 ```
-some demonstrative code
+client = DataExtractionClient()
+client.connect()
+client.run_forever()
 ```
