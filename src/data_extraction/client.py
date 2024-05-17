@@ -10,7 +10,6 @@
 from mqtt_node_network.node import MQTTNode
 from mqtt_node_network.client import (MQTTClient, MQTTBrokerConfig)
 from mqtt_node_network.initialize import initialize
-from mqtt_node_network.configure import start_prometheus_server
 from paho.mqtt.client import MQTTMessage
 from buffered.buffer import Buffer
 from prometheus_client import Gauge
@@ -26,11 +25,12 @@ from collections import deque
 from dataclasses import dataclass
 import psutil
 
+logger = logging.getLogger("data_extraction")
 
 config = initialize(
     config="./config/config.toml", secrets=".env", logger="./config/logger.yaml"
 )
-logger = logging.getLogger("__name__")
+
 BROKER_CONFIG = config["mqtt"]["broker"]
 
 
@@ -100,13 +100,22 @@ class DataExtractionClient(MQTTClient):
         "client_memory_usage",
         "Program's memory usage in MB",
     )
+    client_buffer_length = Gauge(
+        "client_buffer_length",
+        "Length of the buffer before dumping",
+    )
+    client_df_performance_time = Gauge(
+        "client_dataframe_performance_time",
+        "Time in seconds to process csv file in Pandas",
+    )
     
     def __init__(
             self,
-            broker_config: MQTTBrokerConfig = BROKER_CONFIG,
-            data_extraction_config = EXTRACTION_CONFIG,
-            logger = None
+            broker_config: MQTTBrokerConfig = None,
+            data_extraction_config = None,
         ):
+        broker_config = broker_config or BROKER_CONFIG
+        data_extraction_config = data_extraction_config or EXTRACTION_CONFIG
         MQTTClient.__init__(
             self,
             broker_config = broker_config,
@@ -138,7 +147,12 @@ class DataExtractionClient(MQTTClient):
 
         os.makedirs(self.output_directory, exist_ok=True)
         os.makedirs(self.processed_directory, exist_ok=True)
-        # start_prometheus_server(port = 8000)
+
+        self.metrics_label_value = ""
+        for (index, subscription) in enumerate(self.sub_list):
+            if index != 0:
+                self.metrics_label_value += " + "
+            self.metrics_label_value += subscription.split("/")[0]
 
 
     def performance_thread(self) -> None:
@@ -156,12 +170,14 @@ class DataExtractionClient(MQTTClient):
             self.continue_flag = False
         python_process = psutil.Process(os.getpid())
         memory_usage = python_process.memory_info().rss / (1024*1024)  # MB
-        # logger.debug(f"Memory usage: {memory_usage} MB")
-        print(f"Memory usage: {memory_usage} MB")
+        logger.info(f"Memory usage: {memory_usage} MB")
+        # self.client_memory_usage.labels(
+        #     subscriptions = self.metrics_label_value
+        # ).set(memory_usage)
         self.client_memory_usage.set(memory_usage)
-        if memory_usage > 1024:
-            logger.critical(f"Memory leak! Memory usage at {memory_usage}MB. Shutting down program.")
-            print(f"Memory leak! Memory usage at {memory_usage}MB. Shutting down program.")
+        memory_limit = 1024
+        if memory_usage > memory_limit:
+            logger.critical(f"Memory usage of {memory_usage}MB > {memory_limit}MB. Shutting down program.")
             self.continue_flag = False
 
 
@@ -252,13 +268,14 @@ class DataExtractionClient(MQTTClient):
 
     def run_forever(self) -> None:
         self.run()
-        print("Threads started")
+        logger.debug("Threads started")
         while self.continue_flag:
             time.sleep(1)
         self.stop()
 
     
     def stop(self) -> None:
+        self.continue_flag = False
         if self.buffer_handle.is_alive():
             self.buffer_handle.join()
         if self.performance_handle.is_alive():
@@ -325,6 +342,7 @@ class DataExtractionClient(MQTTClient):
         df = self.resample_df(df)
         stop = time.perf_counter()
         performance_time = stop - start
+        self.client_df_performance_time.set(performance_time)
         logger.info(f"Pandas performance time: {performance_time}")
         return df
 
@@ -335,6 +353,7 @@ class DataExtractionClient(MQTTClient):
         while self.continue_flag:
             buffer_time_exceeded = (datetime.now() - compare_time).total_seconds() > self.buffer_time_interval
             if (self.buffer.size() > self.max_buffer) or (buffer_time_exceeded and self.buffer.not_empty()):
+                self.client_buffer_length.set(self.buffer.size())
                 self.dump_buffer_to_csv()
                 compare_time = datetime.now()
             time.sleep(1)
@@ -355,15 +374,14 @@ class DataExtractionClient(MQTTClient):
     def write_to_file(
             self,
             df: pd.DataFrame,
-            filename: str,
+            filepath: str,
             append: bool = False
         ) -> None:
-        output_path = filename
 
         if append:
-            df.to_csv(output_path, mode = 'a', header = not os.path.exists(output_path), index = False)
+            df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = False)
         else:
-            df.to_csv(output_path)
+            df.to_csv(filepath)
 
 
     #-----------------------Currently unused---------------------------------------------------------------------
