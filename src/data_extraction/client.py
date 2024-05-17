@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------------
-# Created By  : Matthew Davidson
+# Created By  : Jason Schultz
 # Created Date: 2023-01-23
 # version ='1.0'
 # ---------------------------------------------------------------------------
-"""a_short_module_description"""
+"""MQTT client for backing up subscribed topics to csv"""
 # ---------------------------------------------------------------------------
 from mqtt_node_network.node import MQTTNode
 from mqtt_node_network.client import (MQTTClient, MQTTBrokerConfig)
