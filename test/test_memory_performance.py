@@ -33,8 +33,8 @@ def test_memory_performance(client):
     i = 0
 
     client.run()
-    while i < 20:
-        time.sleep(60)
+    while i < 100:
+        time.sleep(300)
         client.start_time = datetime(2024,5,15)
         i += 1
     client.stop()

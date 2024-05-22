@@ -155,6 +155,7 @@ class DataExtractionClient(MQTTClient):
             self.metrics_label_value += subscription.split("/")[0]
 
 
+#-------------------Functions for performance monitoring------------------------------------------------------
     def performance_thread(self) -> None:
         while self.continue_flag:
             time.sleep(10)
@@ -181,6 +182,7 @@ class DataExtractionClient(MQTTClient):
             self.continue_flag = False
 
 
+#-------------------General operational functions-------------------------------------------------------------
     def check_message_value(self, message: MQTTMessage):
         if message.payload is None:
             logger.debug(
