@@ -8,8 +8,8 @@ services:
     working_dir: /app
     volumes:
       - ./logs:/app/logs
-      - ./output:/app/output
-      - ./processed_output:/app/processed_output
+      - /srv/data/mqtt_network/raw:/app/output
+      - /srv/data/mqtt_network/processed:/app/processed_output
       - ./config:/app/config
       - /etc/localtime:/etc/localtime:ro # sync timezone with host machine
     command: ["python", "main.py"]
