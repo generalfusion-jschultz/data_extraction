@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 import pandas as pd
 import os
-from threading import (Thread, Lock)
+from threading import Thread
 import json
 import logging
 from collections import deque
@@ -30,7 +30,6 @@ logger = logging.getLogger("data_extraction")
 config = initialize(
     config="./config/config.toml", secrets=".env", logger="./config/logger.yaml"
 )
-
 BROKER_CONFIG = config["mqtt"]["broker"]
 
 
@@ -112,7 +111,7 @@ class DataExtractionClient(MQTTClient):
     def __init__(
             self,
             broker_config: MQTTBrokerConfig = None,
-            data_extraction_config = None,
+            data_extraction_config: DataExtractionConfig = None,
         ):
         broker_config = broker_config or BROKER_CONFIG
         data_extraction_config = data_extraction_config or EXTRACTION_CONFIG
@@ -127,7 +126,6 @@ class DataExtractionClient(MQTTClient):
             topic_structure = data_extraction_config.topic_structure,
         )
         self.start_time = datetime.now()
-        self.lock = Lock()
         self.max_buffer = data_extraction_config.max_buffer_length
         self.resample_time_seconds = data_extraction_config.resample_time
         self.buffer_time_interval = data_extraction_config.max_buffer_time
@@ -137,7 +135,7 @@ class DataExtractionClient(MQTTClient):
         self.output_directory = data_extraction_config.output_directory
         self.processed_directory = data_extraction_config.processed_output_directory
         self.nan_limit = data_extraction_config.nan_limit
-        self.sub_list = data_extraction_config.subscriptions
+        self.subscriptions = data_extraction_config.subscriptions
 
         # Initializing threads
         self.eod_handle = Thread(target = self.end_of_day_thread)
@@ -149,7 +147,7 @@ class DataExtractionClient(MQTTClient):
         os.makedirs(self.processed_directory, exist_ok=True)
 
         self.metrics_label_value = ""
-        for (index, subscription) in enumerate(self.sub_list):
+        for (index, subscription) in enumerate(self.subscriptions):
             if index != 0:
                 self.metrics_label_value += " + "
             self.metrics_label_value += subscription.split("/")[0]
@@ -164,21 +162,21 @@ class DataExtractionClient(MQTTClient):
 
     # https://psutil.readthedocs.io/en/latest/
     # https://stackoverflow.com/questions/276052/how-to-get-current-cpu-and-ram-usage-in-python
-    def performace(self):
+    def performace(self) -> None:
         svmem = psutil.virtual_memory()
         if svmem.percent >= 95:
-            logger.critical(f"VM memory at {svmem.percent}%! Shutting down program.")
+            logger.critical(f"VM memory at {svmem.percent} %! Shutting down program.")
             self.continue_flag = False
         python_process = psutil.Process(os.getpid())
         memory_usage = python_process.memory_info().rss / (1024*1024)  # MB
-        logger.info(f"Memory usage: {memory_usage} MB")
+        logger.info(f"Memory usage: {memory_usage:.2f} MB")
         # self.client_memory_usage.labels(
         #     subscriptions = self.metrics_label_value
         # ).set(memory_usage)
         self.client_memory_usage.set(memory_usage)
-        memory_limit = 1024
+        memory_limit = 2*1024
         if memory_usage > memory_limit:
-            logger.critical(f"Memory usage of {memory_usage}MB > {memory_limit}MB. Shutting down program.")
+            logger.critical(f"Memory usage of {memory_usage:.2f} MB > {memory_limit} MB. Shutting down program.")
             self.continue_flag = False
 
 
@@ -257,15 +255,11 @@ class DataExtractionClient(MQTTClient):
         self.buffer.append(data)
 
 
-    def connect(self) -> None:
-        MQTTClient.connect(self)
-        self.subscribe(self.sub_list)
-
-
     def run(self) -> None:
         self.eod_handle.start()
         self.buffer_handle.start()
         self.performance_handle.start()
+        logger.info("Threads started.")
 
 
     def run_forever(self) -> None:
@@ -287,25 +281,27 @@ class DataExtractionClient(MQTTClient):
 
 
     #-------------Functions for creating final csv based off of csv full of topics-------------------------------
-    def end_of_day_thread(self):
+    def end_of_day_thread(self) -> None:
         while self.continue_flag:
             if datetime.now().day != self.start_time.day:
+                logger.info("EOD reached")
                 self.end_of_day(
                     self.start_time.year,
                     self.start_time.month,
                     self.start_time.day
                 )
-            time.sleep(30)
+            time.sleep(15)
 
 
     def obtain_df(self, year, month, day) -> pd.DataFrame | None:
+        filename = f"{self.output_directory}/{year}{month:02d}{day:02d}-{self.output_filename}.csv"
         try:
-            df = pd.read_csv(f"{self.output_directory}/{self.output_filename}_{year}_{month}_{day}.csv")
+            df = pd.read_csv(filename)
         except FileNotFoundError:
             logger.info(f"{self.output_filename} file not found. No data to process.")
             return None
         except pd.errors.EmptyDataError as error:
-            logger.info(f"Error reading {self.output_filename}: {error}")
+            logger.error(f"Error reading {self.output_filename}: {error}")
             return None
         else:
             return df
@@ -317,7 +313,7 @@ class DataExtractionClient(MQTTClient):
             return
         df = self.process_data_pandas(df)
         os.makedirs(self.processed_directory, exist_ok=True)
-        filename = f"{self.processed_directory}/{self.processed_filename}_{year}_{month}_{day}.csv"
+        filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
         self.start_time = datetime.now()
         self.write_to_file(df, filename)
 
@@ -339,18 +335,19 @@ class DataExtractionClient(MQTTClient):
     # Look into this for interpolating with conditions:
     #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
     def process_data_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
+        logger.info("Starting to process data")
         start = time.perf_counter()
         df = self.interp_df(df)
         df = self.resample_df(df)
         stop = time.perf_counter()
         performance_time = stop - start
         self.client_df_performance_time.set(performance_time)
-        logger.info(f"Pandas performance time: {performance_time}")
+        logger.info(f"Pandas performance time: {performance_time:.2f} s")
         return df
 
 
     #--------------Functions for updating csv with topics when buffer fills up-----------------------------------
-    def manage_buffer_thread(self):
+    def manage_buffer_thread(self) -> None:
         compare_time = datetime.now()
         while self.continue_flag:
             buffer_time_exceeded = (datetime.now() - compare_time).total_seconds() > self.buffer_time_interval
@@ -361,10 +358,10 @@ class DataExtractionClient(MQTTClient):
             time.sleep(1)
 
     
-    def dump_buffer_to_csv(self):
+    def dump_buffer_to_csv(self) -> None:
         # update_list = [self.buffer.popleft() for i in range(len(self.buffer))]
         os.makedirs(self.output_directory, exist_ok=True)
-        filename = f"{self.output_directory}/{self.output_filename}_{self.start_time.year}_{self.start_time.month}_{self.start_time.day}.csv"
+        filename = f"{self.output_directory}/{self.start_time.year}{self.start_time.month:02d}{self.start_time.day:02d}-{self.output_filename}.csv"
         self.update_csv(self.buffer.dump(), filename)
 
     #---------------Write to csv functions-----------------------------------------------------------------------
