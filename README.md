@@ -42,4 +42,6 @@ client = DataExtractionClient(
     broker_config = BROKER_CONFIG,
     data_extraction_config = EXTRACTION_CONFIG
 )
+client.connect()
+client.run_forever()
 ```
