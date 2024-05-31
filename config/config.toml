@@ -22,7 +22,7 @@ id_structure = "category/measurement/field*"
 resample_time = 1
 nan_limit = 4
 ouput_filename = "prototype_zero-mqtt_data-raw"
-output_directory = "output"
+output_directory = "/srv/data/mqtt_network/raw"
 processed_output_filename = "prototype_zero-mqtt_data-processed"
-processed_output_directory = "processed_output"
+processed_output_directory = "/srv/data/mqtt_network/processed"
 

@@ -262,10 +262,20 @@ def assert_dicts(actual: dict[str, dict], expected: dict[str, dict], debug: bool
         for (timestamp, value) in column_values.items():
             if debug:
                 print(value, expected[column_id][timestamp])
-            if np.isnan(value):
-                assert np.isnan(expected[column_id][timestamp])
+                print(type(value))
+            # try:
+            #     value = float(value)
+            # except ValueError:
+            #     pass
+            if isinstance(value, float):
+                if np.isnan(value):
+                    assert np.isnan(expected[column_id][timestamp])
+                else:
+                    assert value == pytest.approx(expected[column_id][timestamp], abs = 0.001)
+            elif isinstance(value, str):
+                assert value == expected[column_id][timestamp]
             else:
-                assert value == pytest.approx(expected[column_id][timestamp], abs = 0.001)
+                assert False
 
 
 def test_nonexistent_topics_file(client):
@@ -376,10 +386,10 @@ def test_standard_topics_file(client):
     }
 
     df = client.obtain_df(2024, 5, 2)
-    df = client.interp_df(df)
-    actual_interp = df.to_dict()
-    assert_dicts(actual_interp, expected_interp)
-    actual_resample = client.resample_df(df).to_dict()
+    # df = client.interp_df(df, method = "time")
+    # actual_interp = df.to_dict()
+    # assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.process_data_pandas(df).to_dict()
     assert_dicts(actual_resample, expected_resample)
 
 
@@ -437,10 +447,10 @@ def test_sparse_column_topics_file(client):
         },
     }
     df = client.obtain_df(2024, 5, 3)
-    df = client.interp_df(df)
-    actual_interp = df.to_dict()
-    assert_dicts(actual_interp, expected_interp)
-    actual_resample = client.resample_df(df).to_dict()
+    # df = client.interp_df(df)
+    # actual_interp = df.to_dict()
+    # assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.process_data_pandas(df).to_dict()
     assert_dicts(actual_resample, expected_resample)
  
 
@@ -470,12 +480,10 @@ def test_remove_nan_rows(client):
         },
     }
     df = client.obtain_df(2024, 5, 4)
-    df = client.interp_df(df)
-    actual_interp = df.to_dict()
-    print(df)
-    assert_dicts(actual_interp, expected_interp)
-    actual_resample = client.resample_df(df).to_dict()
-    print(df)
+    # df = client.interp_df(df)
+    # actual_interp = df.to_dict()
+    # assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.process_data_pandas(df).to_dict()
     assert_dicts(actual_resample, expected_resample)
 
 
@@ -539,15 +547,81 @@ def test_single_topic_entry(client):
         },
     }
     df = client.obtain_df(2024, 5, 7)
-    df = client.interp_df(df)
-    actual_interp = df.to_dict()
-    assert_dicts(actual_interp, expected_interp)
-    actual_resample = client.resample_df(df).to_dict()
+    # df = client.interp_df(df)
+    # actual_interp = df.to_dict()
+    # assert_dicts(actual_interp, expected_interp)
+    actual_resample = client.process_data_pandas(df).to_dict()
+    assert_dicts(actual_resample, expected_resample)
+
+
+def test_handling_string_values(client):
+    expected_interp = {
+        "sensor/liner_control/inductive_heater_power_output-percentage": {
+            datetime(2024,5,29,8,45,46,0): 1.0,
+            datetime(2024,5,29,8,45,46,250000): 1.0,
+            datetime(2024,5,29,8,45,46,500000): 1.0,
+            datetime(2024,5,29,8,45,46,750000): 1.0,
+            datetime(2024,5,29,8,45,47,0): 1.0,
+            datetime(2024,5,29,8,45,47,250000): 1.0,
+            datetime(2024,5,29,8,45,47,500000): 1.0,
+            datetime(2024,5,29,8,45,47,750000): 1.0
+        },
+        "control/liner_control/inductive_heater_feedback-centigrade": {
+            datetime(2024,5,29,8,45,46,0): np.nan,
+            datetime(2024,5,29,8,45,46,250000): 1.0,
+            datetime(2024,5,29,8,45,46,500000): 1.25,
+            datetime(2024,5,29,8,45,46,750000): 1.5,
+            datetime(2024,5,29,8,45,47,0): 1.75,
+            datetime(2024,5,29,8,45,47,250000): 2.0,
+            datetime(2024,5,29,8,45,47,500000): 2.0,
+            datetime(2024,5,29,8,45,47,750000): 2.0
+        },
+        "control/liner_control/inductive_heater_setpoint-centigrade": {
+            datetime(2024,5,29,8,45,46,0): np.nan,
+            datetime(2024,5,29,8,45,46,250000): np.nan,
+            datetime(2024,5,29,8,45,46,500000): 1.0,
+            datetime(2024,5,29,8,45,46,750000): 1.5,
+            datetime(2024,5,29,8,45,47,0): 2.0,
+            datetime(2024,5,29,8,45,47,250000): 2.5,
+            datetime(2024,5,29,8,45,47,500000): 3.0,
+            datetime(2024,5,29,8,45,47,750000): 3.0
+        },
+        "control/liner_control/inductive_heater_enable-bool": {
+            datetime(2024,5,29,8,45,46,0): np.nan,
+            datetime(2024,5,29,8,45,46,250000): np.nan,
+            datetime(2024,5,29,8,45,46,500000): np.nan,
+            datetime(2024,5,29,8,45,46,750000): "ON",
+            datetime(2024,5,29,8,45,47,0): np.nan,
+            datetime(2024,5,29,8,45,47,250000): np.nan,
+            datetime(2024,5,29,8,45,47,500000): np.nan,
+            datetime(2024,5,29,8,45,47,750000): "OFF"
+        }
+    }
+    expected_resample = {
+        "sensor/liner_control/inductive_heater_power_output-percentage": {
+            datetime(2024,5,29,8,45,46): 1.0,
+            datetime(2024,5,29,8,45,47): 1.0,
+        },
+        "control/liner_control/inductive_heater_feedback-centigrade": {
+            datetime(2024,5,29,8,45,46): 1.25,
+            datetime(2024,5,29,8,45,47): 1.9375,
+        },
+        "control/liner_control/inductive_heater_setpoint-centigrade": {
+            datetime(2024,5,29,8,45,46): 1.25,
+            datetime(2024,5,29,8,45,47): 2.625,
+        },
+        "control/liner_control/inductive_heater_enable-bool": {
+            datetime(2024,5,29,8,45,46): "ON",
+            datetime(2024,5,29,8,45,47): "OFF",
+        }
+    }
+    df = client.obtain_df(2024, 5, 29)
+    actual_resample = client.process_data_pandas(df).to_dict()
     assert_dicts(actual_resample, expected_resample)
 
 
 def test_processed_csv_output(client):
-    pass
+    client.end_of_day(2024,5,29)
     
 
 #-------------------Old Unused functions-----------------------------

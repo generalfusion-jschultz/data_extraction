@@ -13,6 +13,7 @@ from mqtt_node_network.initialize import initialize
 from paho.mqtt.client import MQTTMessage
 from buffered.buffer import Buffer
 from prometheus_client import Gauge
+import numpy as np
 
 import time
 from datetime import datetime
@@ -143,8 +144,8 @@ class DataExtractionClient(MQTTClient):
         self.performance_handle = Thread(target = self.performance_thread)
         self.continue_flag: bool = True
 
-        os.makedirs(self.output_directory, exist_ok=True)
-        os.makedirs(self.processed_directory, exist_ok=True)
+        # os.makedirs(self.output_directory, exist_ok=True)
+        # os.makedirs(self.processed_directory, exist_ok=True)
 
         self.metrics_label_value = ""
         for (index, subscription) in enumerate(self.subscriptions):
@@ -296,7 +297,7 @@ class DataExtractionClient(MQTTClient):
     def obtain_df(self, year, month, day) -> pd.DataFrame | None:
         filename = f"{self.output_directory}/{year}{month:02d}{day:02d}-{self.output_filename}.csv"
         try:
-            df = pd.read_csv(filename)
+            df = pd.read_csv(filename, usecols = [0, 2, 3])
         except FileNotFoundError:
             logger.info(f"{self.output_filename} file not found. No data to process.")
             return None
@@ -308,28 +309,53 @@ class DataExtractionClient(MQTTClient):
 
 
     def end_of_day(self, year, month, day) -> None:
+        self.start_time = datetime.now()
         df = self.obtain_df(year, month, day)
         if df is None:
             return
         df = self.process_data_pandas(df)
         os.makedirs(self.processed_directory, exist_ok=True)
         filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
-        self.start_time = datetime.now()
         self.write_to_file(df, filename)
 
 
-    def interp_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        df["time"] = pd.to_datetime(df["time"])
-        df = df.drop(columns = "topic")
+    def interp_df(self, df: pd.DataFrame, method: str) -> pd.DataFrame:
         df = df.pivot(index = "time", columns = ["id"], values = "value")
-        df = df.interpolate(method = "time", limit = self.nan_limit)
+        df = df.interpolate(method = method, limit = self.nan_limit)
         return df
     
     
-    def resample_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.resample(rule = f"{self.resample_time_seconds}s").mean()
+    def resample_df(self, df: pd.DataFrame, how: str) -> pd.DataFrame:
+        df = df.resample(rule = f"{self.resample_time_seconds}s").last()
         df = df.dropna(axis = 0, how = "all")
         return df
+
+
+    def can_cast_to_float(self, series: pd.Series) -> bool:
+        try:
+            # Try to cast each value to float
+            series.astype(float)
+            return True
+        except ValueError:
+            return False
+
+
+    def split_df_by_float(self, df: pd.DataFrame):
+        float_columns = []
+        string_columns = []
+
+        # Iterate over each column
+        for col in df.columns:
+            if self.can_cast_to_float(df[col]):
+                float_columns.append(col)
+            else:
+                string_columns.append(col)
+
+        # Create DataFrames with selected columns
+        float_df = df[float_columns].astype("float64")
+        string_df = df[string_columns]
+
+        return float_df, string_df
 
 
     # Look into this for interpolating with conditions:
@@ -337,13 +363,22 @@ class DataExtractionClient(MQTTClient):
     def process_data_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
         logger.info("Starting to process data")
         start = time.perf_counter()
-        df = self.interp_df(df)
-        df = self.resample_df(df)
+        
+        df["time"] = pd.to_datetime(df["time"])
+        df = df.pivot(index = "time", columns = ["id"], values = "value")
+        float_df, string_df = self.split_df_by_float(df)
+
+        float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
+        float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean().round(4)
+        string_df = string_df.resample(rule = f"{self.resample_time_seconds}s").last()
+        result = pd.concat([float_df, string_df], axis = 1)
+        result = result.dropna(axis = 0, how = "all")
+
         stop = time.perf_counter()
         performance_time = stop - start
         self.client_df_performance_time.set(performance_time)
         logger.info(f"Pandas performance time: {performance_time:.2f} s")
-        return df
+        return result
 
 
     #--------------Functions for updating csv with topics when buffer fills up-----------------------------------
