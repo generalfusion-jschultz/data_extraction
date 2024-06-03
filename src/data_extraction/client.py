@@ -265,13 +265,13 @@ class DataExtractionClient(MQTTClient):
 
     def run_forever(self) -> None:
         self.run()
-        logger.debug("Threads started")
         while self.continue_flag:
             time.sleep(1)
         self.stop()
 
     
     def stop(self) -> None:
+        logger.info("Process stopping")
         self.continue_flag = False
         if self.buffer_handle.is_alive():
             self.buffer_handle.join()
