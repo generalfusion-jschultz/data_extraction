@@ -170,7 +170,7 @@ class DataExtractionClient(MQTTClient):
             self.continue_flag = False
         python_process = psutil.Process(os.getpid())
         memory_usage = python_process.memory_info().rss / (1024*1024)  # MB
-        logger.info(f"Memory usage: {memory_usage:.2f} MB")
+        logger.debug(f"Memory usage: {memory_usage:.2f} MB")
         # self.client_memory_usage.labels(
         #     subscriptions = self.metrics_label_value
         # ).set(memory_usage)
@@ -369,7 +369,7 @@ class DataExtractionClient(MQTTClient):
         float_df, string_df = self.split_df_by_float(df)
 
         float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
-        float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean().round(4)
+        float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean()
         string_df = string_df.resample(rule = f"{self.resample_time_seconds}s").last()
         result = pd.concat([float_df, string_df], axis = 1)
         result = result.dropna(axis = 0, how = "all")
