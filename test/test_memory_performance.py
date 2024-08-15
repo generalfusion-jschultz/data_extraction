@@ -111,3 +111,9 @@ def create_csv(client: DataExtractionClient):
         if len(buffer) > 4_000:
             client.update_csv(buffer.dump(), "./test/test_files/20240522-test.csv")
     client.update_csv(buffer.dump(), "./test/test_files/20240522-test.csv")
+
+
+def test_generator(client: DataExtractionClient):
+    test_list = client.get_unique_ids("./test/test_files/20240522-test.csv")
+    print(test_list)
+    assert 1 == 2

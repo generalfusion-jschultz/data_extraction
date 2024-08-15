@@ -358,6 +358,17 @@ class DataExtractionClient(MQTTClient):
         return float_df, string_df
 
 
+    def get_unique_ids(self, filename: str) -> list[str]:
+        id_list = []
+        with open(filename, "r") as file:
+            next(file, None)  # CHECK FOR ERROR CONDITION IF ONLY 1 ROW EXISTS?
+            for row in file:
+                row_id = row.split(",")[2]
+                if row_id not in id_list:
+                    id_list.append(row_id)
+        return id_list
+
+
     # Look into this for interpolating with conditions:
     #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
     def process_data_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
