@@ -153,7 +153,6 @@ class DataExtractionClient(MQTTClient):
                 self.metrics_label_value += " + "
             self.metrics_label_value += subscription.split("/")[0]
 
-
 #-------------------Functions for performance monitoring------------------------------------------------------
     def performance_thread(self) -> None:
         while self.continue_flag:
@@ -357,7 +356,7 @@ class DataExtractionClient(MQTTClient):
 
         return float_df, string_df
 
-
+    # ---------------- Using generators for memory efficient parsing of csv data-----------------------------
     def get_unique_ids(self, filename: str) -> list[str]:
         id_list = []
         with open(filename, "r") as file:
@@ -368,6 +367,33 @@ class DataExtractionClient(MQTTClient):
                     id_list.append(row_id)
         return id_list
 
+
+    def yield_row_from_csv(self, filename: str):
+        with open(filename, "r") as file:
+            next(file, None)  # CHECK FOR ERROR CONDITION IF ONLY 1 ROW EXISTS?
+            for row in file:
+                row = row.split(",")
+                row_time = row[0]
+                row_id = row[2]
+                row_value = row[3]
+                yield (row_time, row_id, row_value)
+
+    
+    def manage_csv_buffer(self, filename: str):
+        id_list = self.get_unique_ids(filename)
+        data: list = []
+
+        generator = self.yield_row_from_csv(filename)
+        for _ in range(self.max_buffer):
+            (row_time, row_id, row_value) = next(generator)
+            row = {"time": row_time}
+            for unique_id in id_list:
+                if unique_id is row_id:
+                    row.update({row_id: row_value})
+                else:
+                    row.update({unique_id: None})
+            data.append(row)
+            
 
     # Look into this for interpolating with conditions:
     #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
