@@ -99,6 +99,7 @@ def create_csv(client: DataExtractionClient):
     generator = generate_topic_and_id()
     buffer = Buffer()
     for _ in range(2_000_001):
+        time.sleep(0.000001)
         (topic, id_str) = next(generator)
         row = {
             "time": datetime.now(),
@@ -115,5 +116,4 @@ def create_csv(client: DataExtractionClient):
 
 def test_generator(client: DataExtractionClient):
     # create_csv(client)
-    client.manage_csv_buffer("./test/test_files/20240522-test.csv")
     assert 1 == 2

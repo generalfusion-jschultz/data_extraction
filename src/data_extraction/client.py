@@ -34,14 +34,6 @@ config = initialize(
 BROKER_CONFIG = config["mqtt"]["broker"]
 
 
-class Test:
-    def __init__(self):
-        self.a = 1
-
-    def run(self):
-        print("test")
-
-
 @dataclass
 class DataExtractionConfig():
     name: str
@@ -385,17 +377,25 @@ class DataExtractionClient(MQTTClient):
                 row = row.split(",")
                 row_time = row[0]
                 row_id = row[2]
-                row_value = row[3]
+                try:
+                    row_value = float(row[3])
+                except ValueError:
+                    row_value = row[3]
                 yield (row_time, row_id, row_value)
 
     
     def manage_csv_buffer(self, filename: str):
         id_list = self.get_unique_ids(filename)
-        data: list = []
-
+        data: Buffer = Buffer()
         generator = self.yield_row_from_csv(filename)
-        for _ in range(self.max_buffer):
-            (row_time, row_id, row_value) = next(generator)
+        filepath = "./test/test_files/test.csv"
+
+        while True:
+            try:
+                (row_time, row_id, row_value) = next(generator)
+            except StopIteration:
+                self.process_test(data.dump(), filepath)
+                break
             row = {"time": row_time, row_id: row_value}
             # for unique_id in id_list:
             #     if unique_id is row_id:
@@ -404,10 +404,31 @@ class DataExtractionClient(MQTTClient):
             #     else:
             #         row.update({unique_id: None})
             data.append(row)
+            if len(data) == self.max_buffer:
+                self.process_test(data.dump(), filepath)
 
-        df = pd.DataFrame(data)
-        df.to_csv("./test/test_files/test.csv")
-            
+
+    def process_test(self, data: list, filepath: str) -> None:
+        if data:
+            df = pd.DataFrame(data)
+            df["time"] = pd.to_datetime(df["time"])
+            df.set_index("time", inplace = True)
+
+            float_df, string_df = self.split_df_by_float(df)   
+            float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
+            float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean()
+            string_df = string_df.resample(rule = f"{self.resample_time_seconds}s").last()
+            result = pd.concat([float_df, string_df], axis = 1)
+            result = result.dropna(axis = 0, how = "all")
+            self.write_to_file(
+                df = result,
+                filepath = filepath,
+                append = True,
+                index = True
+            )
+        else:  # Data is empty, do nothing for now
+            return
+
 
     # Look into this for interpolating with conditions:
     #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
@@ -417,8 +438,8 @@ class DataExtractionClient(MQTTClient):
         
         df["time"] = pd.to_datetime(df["time"])
         df = df.pivot(index = "time", columns = ["id"], values = "value")
-        float_df, string_df = self.split_df_by_float(df)
 
+        float_df, string_df = self.split_df_by_float(df)
         float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
         float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean()
         string_df = string_df.resample(rule = f"{self.resample_time_seconds}s").last()
@@ -450,6 +471,7 @@ class DataExtractionClient(MQTTClient):
         filename = f"{self.output_directory}/{self.start_time.year}{self.start_time.month:02d}{self.start_time.day:02d}-{self.output_filename}.csv"
         self.update_csv(self.buffer.dump(), filename)
 
+
     #---------------Write to csv functions-----------------------------------------------------------------------
     def update_csv(self, update_list: deque[dict], filename: str) -> None:
         df = pd.DataFrame(update_list)
@@ -460,59 +482,14 @@ class DataExtractionClient(MQTTClient):
             self,
             df: pd.DataFrame,
             filepath: str,
-            append: bool = False
+            append: bool = False,
+            index: bool = False
         ) -> None:
 
         if append:
-            df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = False)
+            df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = index)
         else:
             df.to_csv(filepath)
-
-
-    #-----------------------Currently unused---------------------------------------------------------------------
-    def avg_list_by_time_interval(self, buffer: deque[dict], interval_in_seconds: int) -> deque[dict]:
-        averaged_list = []
-        start_index = 0
-        for (index, data) in enumerate(buffer):
-            if index == 0:
-                start_time = data["time"]
-                continue
-            elif (data["time"] - start_time).total_seconds() > interval_in_seconds:
-                averaged_list.append(self.avg_buffer_interval(buffer[start_index:index]))
-                start_index = index
-                start_time = data["time"]
-                print(index)        # DOUBLE CHECK THAT THIS IS WORKING
-        if start_index != len(buffer):
-            averaged_list.append(self.avg_buffer_interval(buffer[start_index:len(buffer)]))
-        return averaged_list
-
-
-    def avg_buffer_interval(self, time_interval_set_buffer: deque[dict]) -> dict:
-        averaged_results = {
-            "time": []
-        }
-        for data in time_interval_set_buffer:
-            for (k, v) in data.items():
-                if k in averaged_results:
-                    averaged_results[k].append(v)
-                else:
-                    averaged_results.update({k: [v]})
-        
-        for (k, v_list) in averaged_results.items():
-            if k == "time":
-                averaged_results.update({k: pd.to_datetime(pd.Series(v_list)).mean()})
-            else:
-                averaged_results.update({k: sum(v_list)/len(v_list)})
-        return averaged_results
-
-
-    def process_data_manually(self, buffer: deque[dict]) -> pd.DataFrame:
-        df = pd.DataFrame(buffer)
-        print(df)
-        buffer = self.avg_list_by_time_interval(buffer, self.resample_time_seconds)
-        df = pd.DataFrame(buffer)
-        print(df)
-        return df
 
 
     def __del__(self):
