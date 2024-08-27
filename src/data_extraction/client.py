@@ -34,6 +34,14 @@ config = initialize(
 BROKER_CONFIG = config["mqtt"]["broker"]
 
 
+class Test:
+    def __init__(self):
+        self.a = 1
+
+    def run(self):
+        print("test")
+
+
 @dataclass
 class DataExtractionConfig():
     name: str
@@ -152,6 +160,7 @@ class DataExtractionClient(MQTTClient):
             if index != 0:
                 self.metrics_label_value += " + "
             self.metrics_label_value += subscription.split("/")[0]
+
 
 #-------------------Functions for performance monitoring------------------------------------------------------
     def performance_thread(self) -> None:
@@ -356,6 +365,7 @@ class DataExtractionClient(MQTTClient):
 
         return float_df, string_df
 
+
     # ---------------- Using generators for memory efficient parsing of csv data-----------------------------
     def get_unique_ids(self, filename: str) -> list[str]:
         id_list = []
@@ -386,13 +396,17 @@ class DataExtractionClient(MQTTClient):
         generator = self.yield_row_from_csv(filename)
         for _ in range(self.max_buffer):
             (row_time, row_id, row_value) = next(generator)
-            row = {"time": row_time}
-            for unique_id in id_list:
-                if unique_id is row_id:
-                    row.update({row_id: row_value})
-                else:
-                    row.update({unique_id: None})
+            row = {"time": row_time, row_id: row_value}
+            # for unique_id in id_list:
+            #     if unique_id is row_id:
+            #         row.update({row_id: row_value})
+            #         break
+            #     else:
+            #         row.update({unique_id: None})
             data.append(row)
+
+        df = pd.DataFrame(data)
+        df.to_csv("./test/test_files/test.csv")
             
 
     # Look into this for interpolating with conditions:

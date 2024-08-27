@@ -115,6 +115,5 @@ def create_csv(client: DataExtractionClient):
 
 def test_generator(client: DataExtractionClient):
     # create_csv(client)
-    test_list = client.get_unique_ids("./test/test_files/20240522-test.csv")
-    print(test_list)
+    client.manage_csv_buffer("./test/test_files/20240522-test.csv")
     assert 1 == 2

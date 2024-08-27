@@ -46,8 +46,18 @@ def main():
     client = DataExtractionClient(
         BROKER_CONFIG, EXTRACTION_CONFIG
     )
-    client.end_of_day(2024,5,29)
+    # client.end_of_day(2024,5,29)
+    client.manage_csv_buffer("./test/test_files/20240522-test.csv")
     
+    # import os
+    # import csv
+    # filepath = "./test.csv"
+    # l1 = [{"t1": 1, "t2": 4}, {"t1": 2, "t2": 6}, {"t1":3, "t3":8}]
+    # df = pd.DataFrame(l1)
+    # df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = False)
+    # l2 = [{"t1": 4, "t2": 10}, {"t1": 5, "t4": 12}, {"t1":6, "t3":14}]
+    # df = pd.DataFrame(l2)
+    # df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = False)
 
 
 if __name__ == "__main__":
