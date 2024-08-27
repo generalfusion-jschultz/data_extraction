@@ -281,7 +281,7 @@ class DataExtractionClient(MQTTClient):
             self.eod_handle.join()
 
 
-    #-------------Functions for creating final csv based off of csv full of topics-------------------------------
+#-------------Functions for creating final csv based off of csv full of topics-------------------------------
     def end_of_day_thread(self) -> None:
         while self.continue_flag:
             if datetime.now().day != self.start_time.day:
@@ -294,6 +294,7 @@ class DataExtractionClient(MQTTClient):
             time.sleep(15)
 
 
+    # Deprecated
     def obtain_df(self, year, month, day) -> pd.DataFrame | None:
         filename = f"{self.output_directory}/{year}{month:02d}{day:02d}-{self.output_filename}.csv"
         try:
@@ -309,26 +310,18 @@ class DataExtractionClient(MQTTClient):
 
 
     def end_of_day(self, year, month, day) -> None:
-        self.start_time = datetime.now()
-        df = self.obtain_df(year, month, day)
-        if df is None:
-            return
-        df = self.process_data_pandas(df)
+        self.start_time = datetime.now()  # Move start date from yesterday to today
+        # df = self.obtain_df(year, month, day)
+        # if df is None:
+        #     return
+        # df = self.process_data_pandas(df)
         os.makedirs(self.processed_directory, exist_ok=True)
-        filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
-        self.write_to_file(df, filename)
+        # filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
+        # self.write_to_file(df, filename)
 
-
-    def interp_df(self, df: pd.DataFrame, method: str) -> pd.DataFrame:
-        df = df.pivot(index = "time", columns = ["id"], values = "value")
-        df = df.interpolate(method = method, limit = self.nan_limit)
-        return df
-    
-    
-    def resample_df(self, df: pd.DataFrame, how: str) -> pd.DataFrame:
-        df = df.resample(rule = f"{self.resample_time_seconds}s").last()
-        df = df.dropna(axis = 0, how = "all")
-        return df
+        backup_filename = f"{self.output_directory}/{year}{month:02d}{day:02d}-{self.output_filename}.csv"
+        processed_filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
+        self.manage_csv_buffer(backup_filename, processed_filename)
 
 
     def can_cast_to_float(self, series: pd.Series) -> bool:
@@ -358,80 +351,7 @@ class DataExtractionClient(MQTTClient):
         return float_df, string_df
 
 
-    # ---------------- Using generators for memory efficient parsing of csv data-----------------------------
-    def get_unique_ids(self, filename: str) -> list[str]:
-        id_list = []
-        with open(filename, "r") as file:
-            next(file, None)  # CHECK FOR ERROR CONDITION IF ONLY 1 ROW EXISTS?
-            for row in file:
-                row_id = row.split(",")[2]
-                if row_id not in id_list:
-                    id_list.append(row_id)
-        return id_list
-
-
-    def yield_row_from_csv(self, filename: str):
-        with open(filename, "r") as file:
-            next(file, None)  # CHECK FOR ERROR CONDITION IF ONLY 1 ROW EXISTS?
-            for row in file:
-                row = row.split(",")
-                row_time = row[0]
-                row_id = row[2]
-                try:
-                    row_value = float(row[3])
-                except ValueError:
-                    row_value = row[3]
-                yield (row_time, row_id, row_value)
-
-    
-    def manage_csv_buffer(self, filename: str):
-        id_list = self.get_unique_ids(filename)
-        data: Buffer = Buffer()
-        generator = self.yield_row_from_csv(filename)
-        filepath = "./test/test_files/test.csv"
-
-        while True:
-            try:
-                (row_time, row_id, row_value) = next(generator)
-            except StopIteration:
-                self.process_test(data.dump(), filepath)
-                break
-            row = {"time": row_time, row_id: row_value}
-            # for unique_id in id_list:
-            #     if unique_id is row_id:
-            #         row.update({row_id: row_value})
-            #         break
-            #     else:
-            #         row.update({unique_id: None})
-            data.append(row)
-            if len(data) == self.max_buffer:
-                self.process_test(data.dump(), filepath)
-
-
-    def process_test(self, data: list, filepath: str) -> None:
-        if data:
-            df = pd.DataFrame(data)
-            df["time"] = pd.to_datetime(df["time"])
-            df.set_index("time", inplace = True)
-
-            float_df, string_df = self.split_df_by_float(df)   
-            float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
-            float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean()
-            string_df = string_df.resample(rule = f"{self.resample_time_seconds}s").last()
-            result = pd.concat([float_df, string_df], axis = 1)
-            result = result.dropna(axis = 0, how = "all")
-            self.write_to_file(
-                df = result,
-                filepath = filepath,
-                append = True,
-                index = True
-            )
-        else:  # Data is empty, do nothing for now
-            return
-
-
-    # Look into this for interpolating with conditions:
-    #   https://stackoverflow.com/questions/69951782/pandas-interpolate-with-condition
+    # Deprecated
     def process_data_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
         logger.info("Starting to process data")
         start = time.perf_counter()
@@ -453,7 +373,89 @@ class DataExtractionClient(MQTTClient):
         return result
 
 
-    #--------------Functions for updating csv with topics when buffer fills up-----------------------------------
+# ---------------- Using generators for memory efficient parsing of csv data--------------------------------
+    def get_unique_ids(self, filename: str) -> list[str]:
+        id_list = []
+        with open(filename, "r") as file:
+            next(file, None)
+            for row in file:
+                row_id = row.split(",")[2]
+                if row_id not in id_list:
+                    id_list.append(row_id)
+        return id_list
+
+
+    def yield_row_from_csv(self, filename: str):  
+        with open(filename, "r") as file:
+            next(file, None)
+            for row in file:
+                row = row.split(",")
+                row_time = row[0]
+                row_id = row[2]
+                try:
+                    row_value = float(row[3])
+                except ValueError:
+                    row_value = row[3].rstrip()
+                yield (row_time, row_id, row_value)
+
+    
+    def manage_csv_buffer(self, backup_filename: str, processed_filename: str) -> None:
+        try:
+            open(backup_filename, "r")
+        except FileNotFoundError:
+            logger.info(f"{backup_filename} file not found. No data to process.")
+            return None
+        
+        id_list = self.get_unique_ids(backup_filename)
+        data = Buffer()
+        generator = self.yield_row_from_csv(backup_filename)
+        logger.info("Starting to process data")
+        start = time.perf_counter()
+
+        while True:
+            try:
+                (row_time, row_id, row_value) = next(generator)
+            except StopIteration:
+                if data:
+                    df = self.process_data(data.dump())
+                    self.write_to_file(df, processed_filename, append = True, index = True)
+
+                stop = time.perf_counter()
+                performance_time = stop - start
+                self.client_df_performance_time.set(performance_time)
+                logger.info(f"Pandas performance time: {performance_time:.2f} s")
+                break
+
+            row = {"time": row_time}
+            for unique_id in id_list:
+                if unique_id == row_id:
+                    row.update({row_id: row_value})
+                else:
+                    row.update({unique_id: None})
+
+            data.append(row)
+            if (len(data) == self.max_buffer) or (len(data) == data.maxlen):
+                df = self.process_data(data.dump())
+                self.write_to_file(df, processed_filename, append = True, index = True)
+
+
+    def process_data(self, data: list) -> pd.DataFrame:
+        df = pd.DataFrame(data)
+        df["time"] = pd.to_datetime(df["time"])
+        df.set_index("time", inplace = True)
+        rounding_num_decimals = 5
+
+        float_df, string_df = self.split_df_by_float(df)
+        # float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
+        float_df = float_df.resample(rule = f"{self.resample_time_seconds}s").mean()
+        float_df = float_df.round(rounding_num_decimals)
+        string_df = string_df.resample(rule = f"{self.resample_time_seconds}s").last()
+        result = pd.concat([float_df, string_df], axis = 1)
+        result = result.dropna(axis = 0, how = "all")
+        return result
+
+
+#--------------Functions for updating csv with topics when buffer fills up-----------------------------------
     def manage_buffer_thread(self) -> None:
         compare_time = datetime.now()
         while self.continue_flag:
@@ -466,13 +468,12 @@ class DataExtractionClient(MQTTClient):
 
     
     def dump_buffer_to_csv(self) -> None:
-        # update_list = [self.buffer.popleft() for i in range(len(self.buffer))]
         os.makedirs(self.output_directory, exist_ok=True)
         filename = f"{self.output_directory}/{self.start_time.year}{self.start_time.month:02d}{self.start_time.day:02d}-{self.output_filename}.csv"
         self.update_csv(self.buffer.dump(), filename)
 
 
-    #---------------Write to csv functions-----------------------------------------------------------------------
+#---------------Write to csv functions-----------------------------------------------------------------------
     def update_csv(self, update_list: deque[dict], filename: str) -> None:
         df = pd.DataFrame(update_list)
         self.write_to_file(df, filename, append = True)

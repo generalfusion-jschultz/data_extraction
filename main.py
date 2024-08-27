@@ -31,7 +31,7 @@ def main():
     EXTRACTION_CONFIG = DataExtractionConfig(
         name = "test_name",
         node_id = "test_node_id",
-        max_buffer_length = 1000,
+        max_buffer_length = 4000,
         max_buffer_time = 10,
         subscriptions = "machine/#",
         topic_structure = "machine/permission/category/module/measurement/field*",
@@ -40,24 +40,13 @@ def main():
         nan_limit = 4,
         output_filename = "test",
         output_directory = "test/test_files",
-        processed_output_filename = "p0_test",
+        processed_output_filename = "new_test",
         processed_output_directory = "test/test_files"
     )
     client = DataExtractionClient(
         BROKER_CONFIG, EXTRACTION_CONFIG
     )
-    # client.end_of_day(2024,5,29)
-    client.manage_csv_buffer("./test/test_files/20240522-test.csv")
-    
-    # import os
-    # import csv
-    # filepath = "./test.csv"
-    # l1 = [{"t1": 1, "t2": 4}, {"t1": 2, "t2": 6}, {"t1":3, "t3":8}]
-    # df = pd.DataFrame(l1)
-    # df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = False)
-    # l2 = [{"t1": 4, "t2": 10}, {"t1": 5, "t4": 12}, {"t1":6, "t3":14}]
-    # df = pd.DataFrame(l2)
-    # df.to_csv(filepath, mode = 'a', header = not os.path.exists(filepath), index = False)
+    client.end_of_day(2024,5,28)
 
 
 if __name__ == "__main__":
