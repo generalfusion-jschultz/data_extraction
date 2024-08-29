@@ -3,7 +3,7 @@
 # ----------------------------------------------------------------------------
 # Created By  : Jason Schultz
 # Created Date: 2023-01-23
-# version ='1.0'
+# version ='1.1'
 # ---------------------------------------------------------------------------
 """MQTT client for backing up subscribed topics to csv"""
 # ---------------------------------------------------------------------------
@@ -13,7 +13,6 @@ from mqtt_node_network.initialize import initialize
 from paho.mqtt.client import MQTTMessage
 from buffered.buffer import Buffer
 from prometheus_client import Gauge
-import numpy as np
 
 import time
 from datetime import datetime
@@ -22,7 +21,6 @@ import os
 from threading import Thread
 import json
 import logging
-from collections import deque
 from dataclasses import dataclass
 import psutil
 
@@ -170,7 +168,7 @@ class DataExtractionClient(MQTTClient):
             self.continue_flag = False
         python_process = psutil.Process(os.getpid())
         memory_usage = python_process.memory_info().rss / (1024*1024)  # MB
-        logger.debug(f"Memory usage: {memory_usage:.2f} MB")
+        logger.info(f"Memory usage: {memory_usage:.2f} MB")
         # self.client_memory_usage.labels(
         #     subscriptions = self.metrics_label_value
         # ).set(memory_usage)
@@ -281,7 +279,7 @@ class DataExtractionClient(MQTTClient):
             self.eod_handle.join()
 
 
-#-------------Functions for creating final csv based off of csv full of topics-------------------------------
+#-------------Functions for creating final csv based off of topics backup csv-------------------------------
     def end_of_day_thread(self) -> None:
         while self.continue_flag:
             if datetime.now().day != self.start_time.day:
@@ -311,14 +309,16 @@ class DataExtractionClient(MQTTClient):
 
     def end_of_day(self, year, month, day) -> None:
         self.start_time = datetime.now()  # Move start date from yesterday to today
+        
         # df = self.obtain_df(year, month, day)
         # if df is None:
         #     return
         # df = self.process_data_pandas(df)
-        os.makedirs(self.processed_directory, exist_ok=True)
+        # os.makedirs(self.processed_directory, exist_ok=True)
         # filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
         # self.write_to_file(df, filename)
 
+        os.makedirs(self.processed_directory, exist_ok=True)
         backup_filename = f"{self.output_directory}/{year}{month:02d}{day:02d}-{self.output_filename}.csv"
         processed_filename = f"{self.processed_directory}/{year}{month:02d}{day:02d}-{self.processed_filename}.csv"
         self.manage_csv_buffer(backup_filename, processed_filename)
@@ -409,7 +409,7 @@ class DataExtractionClient(MQTTClient):
         id_list = self.get_unique_ids(backup_filename)
         data = Buffer()
         generator = self.yield_row_from_csv(backup_filename)
-        logger.info("Starting to process data")
+        logger.info("Starting to process data.")
         start = time.perf_counter()
 
         while True:
@@ -443,7 +443,7 @@ class DataExtractionClient(MQTTClient):
         df = pd.DataFrame(data)
         df["time"] = pd.to_datetime(df["time"])
         df.set_index("time", inplace = True)
-        rounding_num_decimals = 5
+        rounding_num_decimals = 10
 
         float_df, string_df = self.split_df_by_float(df)
         # float_df = float_df.interpolate(method = "time", limit = self.nan_limit)
@@ -468,14 +468,12 @@ class DataExtractionClient(MQTTClient):
 
     
     def dump_buffer_to_csv(self) -> None:
-        os.makedirs(self.output_directory, exist_ok=True)
+        try:
+            os.makedirs(self.output_directory, exist_ok=True)
+        except Exception as error:
+            logger.error(f"{error}")
         filename = f"{self.output_directory}/{self.start_time.year}{self.start_time.month:02d}{self.start_time.day:02d}-{self.output_filename}.csv"
-        self.update_csv(self.buffer.dump(), filename)
-
-
-#---------------Write to csv functions-----------------------------------------------------------------------
-    def update_csv(self, update_list: deque[dict], filename: str) -> None:
-        df = pd.DataFrame(update_list)
+        df = pd.DataFrame(self.buffer.dump())
         self.write_to_file(df, filename, append = True)
 
 
